@@ -6,7 +6,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 # Definitions
 
-* Source: a Resonate server. Generates an audio stream, manages all the players, provides metadata etc.
+* Server: a Resonate server. Orchestrates all devices. Generates an audio stream, manages all the players, provides metadata etc.
 * Player: a Resonate client that can play audio, visualize audio or album art or provide music controls
 
 # Establishing a Connection
@@ -19,11 +19,9 @@ Resonate servers will also be able to connected to for supporting browsers, mobi
 
 # Communication
 
-Once the connection is established, Player and Source are going to talk.
+Once the connection is established, Player and Server are going to talk.
 
 Websocket Text messages are used to send JSON payloads.
-
-Websocket binary messages are used to send audio chunks.
 
 Message format is as follows:
 
@@ -34,7 +32,9 @@ Message format is as follows:
 }
 ```
 
-## Player to Source: `player/hello`
+Websocket binary messages are used to send audio chunks. The first byte of the binary message is a uint8 that represents the message type.
+
+## Player to Server: `player/hello`
 
 Information about the Output device
 
@@ -50,28 +50,28 @@ Information about the Output device
 * `support_picture_formats` string\[\], Supported media art image formats
 * `media_display_size` string | null, Cover media display size (null for none)
 
-## Source to Player: `source/hello`
+## Server to Player: `server/hello`
 
-Information about the source
+Information about the server
 
-* `source_id` the identifier of the source
-* `name` the name of the source
+* `server_id` the identifier of the server
+* `name` the name of the server
 
-## Player to Source: `player/time`
+## Player to Server: `player/time`
 
-Sends current internal clock timing (in microseconds) to source
+Sends current internal clock timing (in microseconds) to server
 
 * `player_transmitted` players internal clock, in microseconds
 
-## Source to Player: `source/time`
+## Server to Player: `server/time`
 
 Response to the players time message with info to establish a clock offsets
 
 * `player_transmitted` players internal clock, in microseconds
-* `source_received` timestamp that the source received the player/time message
-* `source_transmitted` timestamp that the source transmitted this message
+* `server_received` timestamp that the server received the player/time message
+* `server_transmitted` timestamp that the server transmitted this message
 
-## Source to Player: `session/start`
+## Server to Player: `session/start`
 
 When a player needs to start playing.
 
@@ -87,13 +87,13 @@ Edge cases:
 
 * If a player receives a session/start while it’s already playing that stream type, it should stop the existing one and adopt new one.
 
-## Source to Player: `session/end`
+## Server to Player: `session/end`
 
 Player should stop streaming, clear metadata etc.
 
-## Source to Player: `metadata/update`
+## Server to Player: `metadata/update`
 
-This is deltas. Has to be merged into what exists. Source ensures first one is the full one. If a field is optional and has to be nullified, the value will be set to `null`.
+This is deltas. Has to be merged into what exists. Server ensures first one is the full one. If a field is optional and has to be nullified, the value will be set to `null`.
 
 Paulus: I just added some fields to get ball rolling
 Paulus: should all fields be included or be partial updates?
@@ -108,15 +108,15 @@ Paulus: should all fields be included or be partial updates?
 * `repeat` "off" | "one" | "all";
 * `shuffle` boolean;
 
-## Player to Source: `stream/command`
+## Player to Server: `stream/command`
 
 Control the stream that we’re playing
 
 * `command` one values listed in `metadata/update` field `support_commands`
 
-## Player to Source: `player/state`
+## Player to Server: `player/state`
 
-The player can be controlled via physical controls or other remote APIs, like ESPHome API via HA. For example, player will tell source that it got controlled.
+The player can be controlled via physical controls or other remote APIs, like ESPHome API via HA. For example, player will tell server that it got controlled.
 
 Paulus: should all fields be included or be partial updates?
 
@@ -127,35 +127,34 @@ Paulus: should all fields be included or be partial updates?
 * `volume` integer 0-100
 * `muted` boolean
 
-## Player to Source: fetch groups
+## Player to Server: fetch groups
 
 Fetches all groups available to join on the server
 
 * Include state of each group: playing, paused, or idle
 
-## Player to Source: `group/join`
+## Player to Server: `group/join`
 
 When a player wants to join a group
 
 Response is a metadata/update. You will also get a response end message if a stream is playing.
 
-## Player to Source: `group/unjoin`
+## Player to Server: `group/unjoin`
 
 When a player wants to leave group
 
 Response is a metadata/update
 
-## Source to Player: `volume/set`
+## Server to Player: `volume/set`
 
 * `volume`, number: Volume range: 1-100 (integer)
 
-## Source to Player: `mute/set`
+## Server to Player: `mute/set`
 
 * `Mute`, bool
 
-## Source to Player: binary message
+## Server to Player: binary message
 
-The binary message from source to player is always an audio chunk.
 If no session is playing, the binary message should be rejected.
 Range is inclusive of both start and end.
 
