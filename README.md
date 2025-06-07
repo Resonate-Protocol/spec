@@ -127,9 +127,13 @@ Paulus: should all fields be included or be partial updates?
 * `volume` integer 0-100
 * `muted` boolean
 
-## Player to Server: fetch groups
+## Player to Server: `group/get-list`
 
-Fetches all groups available to join on the server
+Request all groups available to join on the server
+
+## Server to Player: `group/list`
+
+All groups available to join on the server
 
 * Include state of each group: playing, paused, or idle
 
