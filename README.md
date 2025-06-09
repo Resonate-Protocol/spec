@@ -34,6 +34,55 @@ Message format is as follows:
 
 Websocket binary messages are used to send audio chunks. The first byte of the binary message is a uint8 that represents the message type.
 
+```mermaid
+sequenceDiagram
+    participant Player
+    participant Server
+
+    Note over Player,Server: WebSocket connection established
+
+    Note over Player,Server: Text messages = JSON payloads, Binary messages = Audio / Art
+
+    Player->>Server: player/hello (device capabilities)
+    Server->>Player: server/hello (server info)
+
+    Player->>Server: player/time (player clock)
+    Server->>Player: server/time (timing + offset info)
+
+    Server->>Player: session/start (start playback session)
+    alt already playing
+        Note over Player: Stop existing session before starting new
+    end
+
+    Server->>Player: metadata/update (initial/full or delta metadata)
+    loop During playback
+        Server->>Player: binary Type 1 (audio chunk)
+    end
+
+    Player->>Server: stream/command (play, pause, etc.)
+    Player->>Server: player/state (current physical/API state)
+
+    Server->>Player: session/end (stop playback, cleanup)
+
+    Player->>Server: group/get-list
+    Server->>Player: group/list (groups + state)
+
+    Player->>Server: group/join
+    Server-->>Player: metadata/update and optional session/end
+
+    Player->>Server: group/unjoin
+    Server-->>Player: metadata/update
+
+    Server->>Player: volume/set
+    Server->>Player: mute/set
+
+    alt session active
+        Server->>Player: binary Type 2 (media art)
+    else no session
+        Note over Player: Reject binary message
+    end
+```
+
 ## Player to Server: `player/hello`
 
 Information about the Output device
