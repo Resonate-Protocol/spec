@@ -130,7 +130,7 @@ When a player needs to start playing.
 * `channels`, number: channels to be used
 * `bit_depth`, number: bit depth to be used
 * `now`, signed bigint64: current time on the server as unix timestamp in microseconds
-* `codec_header`, XXXX | null: Codec header (if necessary; e.g., FLAC)
+* `codec_header`, XXXX | null: Codec header (if necessary; e.g., FLAC). Encoded as a Base64 string.
 
 Edge cases:
 
