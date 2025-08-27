@@ -6,12 +6,12 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 # Definitions
 
-* Server: a Resonate server. Orchestrates all devices. Generates an audio stream, manages all the players, provides metadata etc.
-* Player: a Resonate client that can play audio, visualize audio or album art or provide music controls
+* Server: a Resonate server. Orchestrates all devices. Generates an audio stream, manages all the players and clients, provides metadata etc.
+* Client: a Resonate client that can play audio, visualize audio or album art or provide music controls
 
 # Establishing a Connection
 
-Players will announce their presence via mDNS on the `resonate` type.
+Clients will announce their presence via mDNS on the `resonate` type.
 
 Resonate communicates over WebSockets on the path `/resonate`. Recommend port is `8927`.
 
@@ -19,7 +19,7 @@ Resonate servers will also be able to connected to for supporting browsers, mobi
 
 # Communication
 
-Once the connection is established, Player and Server are going to talk.
+Once the connection is established, Client and Server are going to talk.
 
 Websocket Text messages are used to send JSON payloads.
 
@@ -36,93 +36,95 @@ Websocket binary messages are used to send audio chunks. The first byte of the b
 
 ```mermaid
 sequenceDiagram
-    participant Player
+    participant Client
     participant Server
 
-    Note over Player,Server: WebSocket connection established
+    Note over Client,Server: WebSocket connection established
 
-    Note over Player,Server: Text messages = JSON payloads, Binary messages = Audio / Art
+    Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio / Art
 
-    Player->>Server: player/hello (device capabilities)
-    Server->>Player: server/hello (server info)
+    Client->>Server: client/hello (device role and capabilities)
+    Server->>Client: server/hello (server info)
 
-    Player->>Server: player/time (player clock)
-    Server->>Player: server/time (timing + offset info)
+    Client->>Server: client/time (client clock)
+    Server->>Client: server/time (timing + offset info)
 
-    Server->>Player: session/start (start playback session)
+    Server->>Client: session/start (start playback session)
     alt already playing
-        Note over Player: Stop existing session before starting new
+        Note over Client: Stop existing session before starting new
     end
 
-    Server->>Player: metadata/update (initial/full or delta metadata)
+    Server->>Client: metadata/update (initial/full or delta metadata)
     loop During playback
-        Server->>Player: binary Type 1 (audio chunk)
+        Server->>Client: binary Type 1 (audio chunk)
     end
 
-    Player->>Server: stream/command (play, pause, etc.)
-    Player->>Server: player/state (current physical/API state)
+    Client->>Server: stream/command (play, pause, etc.)
+    Client->>Server: player/state (current physical/API state)
 
-    Server->>Player: session/end (stop playback, cleanup)
+    Server->>Client: session/end (stop playback, cleanup)
 
-    Player->>Server: group/get-list
-    Server->>Player: group/list (groups + state)
+    Client->>Server: group/get-list
+    Server->>Client: group/list (groups + state)
 
-    Player->>Server: group/join
-    Server-->>Player: metadata/update and optional session/end
+    Client->>Server: group/join
+    Server-->>Client: metadata/update and optional session/end
 
-    Player->>Server: group/unjoin
-    Server-->>Player: metadata/update
+    Client->>Server: group/unjoin
+    Server-->>Client: metadata/update
 
-    Server->>Player: volume/set
-    Server->>Player: mute/set
+    Server->>Client: volume/set
+    Server->>Client: mute/set
 
     alt session active
-        Server->>Player: binary Type 2 (media art)
+        Server->>Client: binary Type 2 (media art)
     else no session
-        Note over Player: Reject binary message
+        Note over Client: Reject binary message
     end
 ```
 
-## Player to Server: `player/hello`
+## Client to Server: `client/hello`
 
-Information about the Output device
+Information about the Resonate client.
+Players that can output audio should have the role `play`.
 
-* `player_id` string, to uniquely identify the player for groups and de-duplication
+* `client_id` string, to uniquely identify the client for groups and de-duplication
 * `name` string,
 * `support_codecs` string\[\], Supported codecs listed in order of highest priority to lowest
 * `support_channels` number\[\], Number of channels (in order of priority)
 * `support_sample_rates` number\[\], Supported sample rates (also in order of priority)
 * `support_bit_depth` number\[\], Bit depth (also in order of priority)
 * `buffer_capacity` number, Buffer capacity size in bytes
-* `role` string, what the device wants to “play”. It could be used for voice, display artwork or remote control only device. (not specced out, keep option out)
+* `role` string, one of:
+  * `"play"` - Device that can output audio/music and may also control and visualize it
 * `support_streams` string\[\] Supported streams (can be media, or voice (not supported now)).
 * `support_picture_formats` string\[\], Supported media art image formats
 * `media_display_size` string | null, Cover media display size (null for none)
 
-## Server to Player: `server/hello`
+## Server to Client: `server/hello`
 
 Information about the server
 
 * `server_id` the identifier of the server
 * `name` the name of the server
 
-## Player to Server: `player/time`
+## Client to Server: `client/time`
 
 Sends current internal clock timing (in microseconds) to server
 
-* `player_transmitted` players internal clock, in microseconds
+* `client_transmitted` clients internal clock, in microseconds
 
-## Server to Player: `server/time`
+## Server to Client: `server/time`
 
-Response to the players time message with info to establish a clock offsets
+Response to the clients time message with info to establish a clock offsets
 
-* `player_transmitted` players internal clock, in microseconds
-* `server_received` timestamp that the server received the player/time message
+* `client_transmitted` clients internal clock, in microseconds
+* `server_received` timestamp that the server received the client/time message
 * `server_transmitted` timestamp that the server transmitted this message
 
-## Server to Player: `session/start`
+## Server to Client: `session/start`
 
-When a player needs to start playing.
+When a client needs to start playing.
 
 * `session_id`, string: identifier for the session
 * `codec`, string: codec to be used
@@ -134,13 +136,13 @@ When a player needs to start playing.
 
 Edge cases:
 
-* If a player receives a session/start while it’s already playing that stream type, it should stop the existing one and adopt new one.
+* If a client receives a session/start while it’s already playing that stream type, it should stop the existing one and adopt new one.
 
-## Server to Player: `session/end`
+## Server to Client: `session/end`
 
-Player should stop streaming, clear metadata etc.
+Client should stop streaming, clear metadata etc.
 
-## Server to Player: `metadata/update`
+## Server to Client: `metadata/update`
 
 This is deltas. Has to be merged into what exists. Server ensures first one is the full one. If a field is optional and has to be nullified, the value will be set to `null`.
 
@@ -152,20 +154,20 @@ Paulus: should all fields be included or be partial updates?
 * `album` string; optional
 * `year` number; optional
 * `track` number; optional
-* `group_members` string\[\]: player IDs
+* `group_members` string\[\]: client IDs
 * `support_commands` string\[\]: array containing a subset of these: "play" | "pause" | "stop" | "seek" | "volume"
 * `repeat` "off" | "one" | "all";
 * `shuffle` boolean;
 
-## Player to Server: `stream/command`
+## Client to Server: `stream/command`
 
 Control the stream that we’re playing
 
 * `command` one values listed in `metadata/update` field `support_commands`
 
-## Player to Server: `player/state`
+## Client to Server: `player/state`
 
-The player can be controlled via physical controls or other remote APIs, like ESPHome API via HA. For example, player will tell server that it got controlled.
+The player can be controlled via physical controls or other remote APIs, like ESPHome API via HA. For example, the player will tell server that it got controlled.
 
 Paulus: should all fields be included or be partial updates?
 
@@ -176,37 +178,37 @@ Paulus: should all fields be included or be partial updates?
 * `volume` integer 0-100
 * `muted` boolean
 
-## Player to Server: `group/get-list`
+## Client to Server: `group/get-list`
 
 Request all groups available to join on the server
 
-## Server to Player: `group/list`
+## Server to Client: `group/list`
 
 All groups available to join on the server
 
 * Include state of each group: playing, paused, or idle
 
-## Player to Server: `group/join`
+## Client to Server: `group/join`
 
-When a player wants to join a group
+When a client wants to join a group
 
 Response is a metadata/update. You will also get a response end message if a stream is playing.
 
-## Player to Server: `group/unjoin`
+## Client to Server: `group/unjoin`
 
-When a player wants to leave group
+When a client wants to leave group
 
 Response is a metadata/update
 
-## Server to Player: `volume/set`
+## Server to Client: `volume/set`
 
 * `volume`, number: Volume range: 1-100 (integer)
 
-## Server to Player: `mute/set`
+## Server to Client: `mute/set`
 
 * `Mute`, bool
 
-## Server to Player: binary message
+## Server to Client: binary message
 
 If no session is playing, the binary message should be rejected.
 Range is inclusive of both start and end.
