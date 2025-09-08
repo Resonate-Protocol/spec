@@ -223,5 +223,4 @@ Range is inclusive of both start and end.
 ### Binary message: audio chunk. Type 1
 
 * Byte 1-8: timestamp (signed int64)
-* Byte 9-12: number of samples (per channel) in chunk
 * Rest of bytes: encoded audio frame
