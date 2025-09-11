@@ -125,9 +125,9 @@ Players that can output audio should have the role `player`.
   - `support_bit_depth`: number[] - bit depth in priority order
   - `buffer_capacity`: number - buffer capacity size in bytes
 - `metadata_support?`: object - only if `metadata` role is set
-  - `support_picture_formats`: string[] - supported media art image formats
-  - `media_width?`: number - null to receive original size
-  - `media_height?`: number - null to receive original size
+  - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
+  - `media_width?`: number - max width in pixels (if only width set, scales preserving aspect ratio)
+  - `media_height?`: number - max height in pixels (if only height set, scales preserving aspect ratio) 
 - `visualizer_support?`: object - only if `visualizer` role is set
   - Desired FFT details (to be determined)
   - `buffer_capacity`: number - buffer capacity size in bytes
@@ -170,23 +170,23 @@ When a new stream starts.
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 - `visualizer?`: object - only sent to clients with the `visualizer` role
   - FFT details (to be determined)
-- `metadata?`: object - only sent to clients with the `metadata` role
-  - `art_format`: string - format of the encoded image: `bmp`, `jpeg`, or `png`
+- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
+  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
 
 ## Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
 - `player?`: object - only sent to clients with the `player` role
-  - `codec?`: string - codec to be used
-  - `sample_rate?`: number - sample rate to be used
-  - `channels?`: number - channels to be used
-  - `bit_depth?`: number - bit depth to be used
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 - `visualizer?`: object - only sent to clients with the `visualizer` role
   - FFT details (to be determined)
-- `metadata?`: object - only sent to clients with the `metadata` role
-  - `art_format?`: string - format of the encoded image: `bmp`, `jpeg`, or `png`
+- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
+  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
 
 ## Server → Client: `stream/end`
 
@@ -200,7 +200,7 @@ No payload.
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
 - `group_id`: string - group identifier
-- `playback_state?`: string - only sent to clients with `controller` or `metadata` roles
+- `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `metadata?`: object - only sent to clients with `metadata` role
   - `timestamp`: number - server timestamp for when this metadata is valid
   - `title?`: string | null
@@ -213,8 +213,8 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
   - `track_progress?`: number | null - in seconds
   - `track_duration?`: number | null - in seconds
   - `playback_speed?`: number | null - speed factor
-  - `repeat?`: 'off' | 'one' | 'all'
-  - `shuffle?`: boolean
+  - `repeat?`: 'off' | 'one' | 'all' | null
+  - `shuffle?`: boolean | null
 
 ## Server → Client: `group/update`
 
@@ -224,13 +224,13 @@ Group state update.
 - `members`: object[] - list of group members
   - `client_id`: string - client identifier
   - `name`: string - client friendly name
-- `session_id?`: string - null if no active session
+- `session_id`: string | null - null if no active session
 
 ## Client → Server: `group/command`
 
 Control the group that's playing. Only valid from clients with the `controller` role.
 
-- `command`: string - one of the values listed in `group/update` field `supported_commands`
+- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -240,7 +240,7 @@ Informs the server of player state changes. Only for clients with the `player` r
 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
-- `state`: string - `playing` if active stream, `idle` if no active stream
+- `state`: 'playing' | 'idle' - playing if active stream, idle if no active stream
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
 
@@ -257,7 +257,7 @@ All groups available to join on the server.
 - `groups`: object[] - list of available groups
   - `group_id`: string - group identifier
   - `name`: string - group name
-  - `state`: string - `playing`, `paused`, or `idle`
+  - `state`: 'playing' | 'paused' | 'idle'
   - `member_count`: number - number of clients in group
 
 ## Client → Server: `group/join`
