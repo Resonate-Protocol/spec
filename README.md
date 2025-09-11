@@ -14,7 +14,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
 - **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. The server sends audio chunks as far ahead as the client's buffer capacity allows
 
 ## Establishing a Connection
 
@@ -42,6 +42,20 @@ Message format:
 ```
 
 WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
+
+## Clock Synchronization
+
+Clients continuously send `client/time` messages to maintain an accurate offset from the server's clock. The frequency of these messages is determined by the client based on network conditions and clock stability.
+
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients use their computed offset to translate server timestamps to their local clock for synchronized playback.
+
+## Playback Synchronization
+
+- Each client is responsible for maintaining synchronization with the server's timestamps
+- Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
+- When a client cannot maintain sync (e.g., buffer underrun), it should mute its audio output and continue buffering until it can resume synchronized playback
+- The server is unaware of individual client sync synchronized accuracy - it simply broadcasts timestamped audio
+- Late-joining clients receive audio with future timestamps only, allowing them to start playback in sync with existing clients
 
 ```mermaid
 sequenceDiagram
@@ -287,28 +301,23 @@ Request different stream format (upgrade or downgrade). Only for clients with th
 
 Response: `stream/update` with the new format.
 
-<!-- ## Server to Client: `volume/set`
-
-* `volume`, number: Volume range: 1-100 (integer)
-
-## Server to Client: `mute/set`
-
-* `Mute`, bool -->
+**Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ## Server → Client: Binary Messages
 
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type (uint8)
-- Bytes 1-8: timestamp (big-endian int64)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 
 ### Type 1: Audio Chunk
 - Rest of bytes: encoded audio frame
+- The timestamp indicates when the first sample in the chunk should begin playback
 
 ### Type 2: Media Art
 - Rest of bytes: encoded image
+- The timestamp indicates when this artwork becomes valid for display
 
 ### Type 3: Visualization
 - Rest of bytes: visualization data
-
-
+- The timestamp indicates when this visualization data corresponds to the audio
