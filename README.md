@@ -4,42 +4,44 @@ _This is raw, unfiltered and experimental._
 
 Resonate is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
-# Definitions
+## Definitions
 
-- `Resonate Server` - orchestrates all devices. Generates an audio stream, manages all the players and clients, provides metadata etc.
-- `Resonate Client` - a client that can play audio, visualize audio, display metadata, or provide music controls. It has different possible roles like player, metadata, controller, visualizer. Every client has a unique identifier.
-  - Player - a particular type of client that receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - Metadata - a particular type of client for displaying metadata. Has preferred format for cover art
-  - Controller - a particular type of client for controlling Resonate groups.
-  - Visualizer - a particular type of client for visualizing music. Has preferred format for the preferred audio features.
-- `Resonate Group` - A group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null).
-- `Resonate Session` - Session details the currently playing media and its playback state. Session has associated metadata. Session has a unique identifier. Each session is associated with exactly one group.
-- `Resonate Stream` - Client specific details on how the server is formatting the binary data and as well as sending the binary data itself
+- **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
+- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
+  - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
+  - **Metadata** - displays metadata. Has preferred format for cover art
+  - **Controller** - controls Resonate groups
+  - **Visualizer** - visualizes music. Has preferred format for audio features
+- **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
+- **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data
 
-# Establishing a Connection
+## Establishing a Connection
 
-Clients will announce their presence via mDNS on the `resonate` type.
+Clients announce their presence via mDNS using the service type `_resonate._tcp`.
 
-Resonate communicates over WebSockets on the path `/resonate`. Recommend port is `8927`.
+Resonate communicates over WebSockets on the path `/resonate`. Recommended port is `8927`.
 
-Resonate servers will also be able to connected to for supporting browsers, mobile apps, and other devices that can run a WebSocket client.
+Resonate servers support connections from browsers, mobile apps, and other WebSocket-capable clients.
 
-# Communication
+## Communication
 
 Once the connection is established, Client and Server are going to talk.
 
-Websocket Text messages are used to send JSON payloads.
+WebSocket text messages are used to send JSON payloads.
 
-Message format is as follows:
+**Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
-```javascript
+Message format:
+
+```json
 {
   "type": "stream/start",
-  "payload": { ... },
+  "payload": { ... }
 }
 ```
 
-Websocket binary messages are used to send audio chunks. The first byte of the binary message is a uint8 that represents the message type.
+WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
 
 ```mermaid
 sequenceDiagram
@@ -108,27 +110,27 @@ sequenceDiagram
 Information about the Resonate client.
 Players that can output audio should have the role `player`.
 
-- `client_id`: string, to uniquely identify the client for groups and de-duplication.
-- `name`: string, friendly name of the client.
-- `version`: number, version that the Resonate client implements.
-- `supported_roles`: string[], at least one of:
-  - `player` - Client that outputs audio.
-  - `controller` - Client that controls a group.
-  - `metadata` - Client that displays metadata.
-  - `visualizer` - Client that visualizes audio.
-- `player_support`: (only if `player` role is set)
-  - `support_codecs`: string[], supported codecs listed in order of highest priority to lowest.
-  - `support_channels`: number[], number of channels (in order of priority).
-  - `support_sample_rates`: number[], supported sample rates (in order of priority).
-  - `support_bit_depth`: number[], bit depth (in order of priority).
-  - `buffer_capacity`: number, buffer capacity size in bytes.
-- `metadata_support`: (only if `metadata` role is set)
-  - `support_picture_formats`: string[], supported media art image formats.
-  - `media_width`: number | null, null to receive original size.
-  - `media_height`: number | null, null to receive original size.
-- `visualizer_support`: (only if `visualizer` role is set)
-  - Desired FFT details (to be determined).
-  - `buffer_capacity`: number, buffer capacity size in bytes.
+- `client_id`: string - uniquely identifies the client for groups and de-duplication
+- `name`: string - friendly name of the client
+- `version`: number - version that the Resonate client implements
+- `supported_roles`: string[] - at least one of:
+  - `player` - outputs audio
+  - `controller` - controls a group
+  - `metadata` - displays metadata
+  - `visualizer` - visualizes audio
+- `player_support?`: object - only if `player` role is set
+  - `support_codecs`: string[] - supported codecs in priority order
+  - `support_channels`: number[] - number of channels in priority order
+  - `support_sample_rates`: number[] - supported sample rates in priority order
+  - `support_bit_depth`: number[] - bit depth in priority order
+  - `buffer_capacity`: number - buffer capacity size in bytes
+- `metadata_support?`: object - only if `metadata` role is set
+  - `support_picture_formats`: string[] - supported media art image formats
+  - `media_width?`: number - null to receive original size
+  - `media_height?`: number - null to receive original size
+- `visualizer_support?`: object - only if `visualizer` role is set
+  - Desired FFT details (to be determined)
+  - `buffer_capacity`: number - buffer capacity size in bytes
 
 
 <!-- * `support_streams` string\[\] Supported streams (can be media, or voice (not supported now)). -->
@@ -136,127 +138,143 @@ Players that can output audio should have the role `player`.
 
 ## Server → Client: `server/hello`
 
-Information about the server
+Information about the server.
 
-- `server_id`: string, the identifier of the server.
-- `name`: string, the friendly name of the server.
-- `version`: number, the latest supported version of Resonate the server supports.
+- `server_id`: string - identifier of the server
+- `name`: string - friendly name of the server
+- `version`: number - latest supported version of Resonate
 
 ## Client → Server: `client/time`
 
-Sends current internal clock timestamp (in microseconds) to server
+Sends current internal clock timestamp (in microseconds) to server.
 
-- `client_transmitted`: number, clients internal clock timestamp, in microseconds.
+- `client_transmitted`: number - client's internal clock timestamp in microseconds
 
 ## Server → Client: `server/time`
 
-Response to the clients time message with info to establish a clock offsets
+Response to the client's time message with info to establish clock offsets.
 
-- `client_transmitted`: number, clients internal clock timestamp received in the `client/time` message.
-- `server_received`: number, timestamp that the server received the client/time message, in microseconds.
-- `server_transmitted`: number, timestamp that the server transmitted this message, in microseconds.
+- `client_transmitted`: number - client's internal clock timestamp received in the `client/time` message
+- `server_received`: number - timestamp that the server received the client/time message in microseconds
+- `server_transmitted`: number - timestamp that the server transmitted this message in microseconds
 
 ## Server → Client: `stream/start`
 
 When a new stream starts.
 
-- `player`: (Only sent to clients with the `player` role)
-  - `codec`: string, codec to be used.
-  - `sample_rate`: number, sample rate to be used.
-  - `channels`: number, channels to be used.
-  - `bit_depth`: number, bit depth to be used.
-  - `codec_header`: string | null, Base64 encoded codec header (if necessary; e.g., FLAC).
-- `visualizer`: (Only sent to clients with the `visualizer` role)
-  - FFT details (to be determined).
-- `metadata`: (Only sent to clients with the `metadata` role)
-  - `art_format`: string, format of the encoded image `bmp`, `jpeg`, or `png`.
+- `player?`: object - only sent to clients with the `player` role
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+- `visualizer?`: object - only sent to clients with the `visualizer` role
+  - FFT details (to be determined)
+- `metadata?`: object - only sent to clients with the `metadata` role
+  - `art_format`: string - format of the encoded image: `bmp`, `jpeg`, or `png`
 
 ## Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
-- `player`: (Only sent to clients with the `player` role)
-  - `codec`: string, codec to be used.
-  - `sample_rate`: number, sample rate to be used.
-  - `channels`: number, channels to be used.
-  - `bit_depth`: number, bit depth to be used.
-  - `codec_header`: string | null, Base64 encoded codec header (if necessary; e.g., FLAC).
-- `visualizer`: (Only sent to clients with the `visualizer` role)
-  - FFT details (to be determined).
-- `metadata`: (Only sent to clients with the `metadata` role)
-  - `art_format`: string, format of the encoded image `bmp`, `jpeg`, or `png`.
+- `player?`: object - only sent to clients with the `player` role
+  - `codec?`: string - codec to be used
+  - `sample_rate?`: number - sample rate to be used
+  - `channels?`: number - channels to be used
+  - `bit_depth?`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+- `visualizer?`: object - only sent to clients with the `visualizer` role
+  - FFT details (to be determined)
+- `metadata?`: object - only sent to clients with the `metadata` role
+  - `art_format?`: string - format of the encoded image: `bmp`, `jpeg`, or `png`
 
 ## Server → Client: `stream/end`
 
 Player should stop streaming and clear buffers - report idle state.
 Visualizer should stop visualizing and clear buffers.
 
+No payload.
+
 ## Server → Client: `session/update`
 
-This is deltas. Has to be merged into what exists. If a field is optional and has to be nullified, the value will be set to `null`. The server should null the metadata whenever a session is ended.
+Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
-- `group_id`: string.
-- `playback_state`: string, optional, only sent to clients with `controller` or `metadata` roles.
-- `metadata`: object, optional, only sent to clients with `metadata` role.
-  - `timestamp`: number, server timestamp for when this metadata is valid.
-  - `title`: string | null, optional.
-  - `artist`: string | null, optional.
-  - `album_artist`: string | null, optional.
-  - `album`: string | null, optional.
-  - `artwork_url`: string | null, optional.
-  - `year`: number | null, optional.
-  - `track`: number | null, optional.
-  - `track_progress`: number | null, in seconds, optional.
-  - `track_duration`: number | null, in seconds, optional.
-  - `playback_speed`: number | null, speed factor, optional.
-  - `repeat`: 'off' | 'one' | 'all'.
-  - `shuffle`: boolean.
+- `group_id`: string - group identifier
+- `playback_state?`: string - only sent to clients with `controller` or `metadata` roles
+- `metadata?`: object - only sent to clients with `metadata` role
+  - `timestamp`: number - server timestamp for when this metadata is valid
+  - `title?`: string | null
+  - `artist?`: string | null
+  - `album_artist?`: string | null
+  - `album?`: string | null
+  - `artwork_url?`: string | null
+  - `year?`: number | null
+  - `track?`: number | null
+  - `track_progress?`: number | null - in seconds
+  - `track_duration?`: number | null - in seconds
+  - `playback_speed?`: number | null - speed factor
+  - `repeat?`: 'off' | 'one' | 'all'
+  - `shuffle?`: boolean
 
 ## Server → Client: `group/update`
-- `supported_commands`: string[], array containing a subset of the following group commands: `play` | `pause` | `stop` | `next` | `previous` | `seek` | `volume` | `mute`.
-- `members`: object[].
-  - `client_id`: string.
-  - `name`: string.
-- `session_id`: string | null, null if no active session.
+
+Group state update.
+
+- `supported_commands`: string[] - subset of: `play`, `pause`, `stop`, `next`, `previous`, `seek`, `volume`, `mute`
+- `members`: object[] - list of group members
+  - `client_id`: string - client identifier
+  - `name`: string - client friendly name
+- `session_id?`: string - null if no active session
 
 ## Client → Server: `group/command`
 
-Control the group that's playing. Only valid from clients that have the `controller` role.
-- `command`: string, one of the values listed in `group/update` field `supported_commands`.
-- `volume`: number | null, volume range: 0-100, optional, only set if `command` is `volume`.
-- `mute`: boolean | null, true to mute, false to unmute, optional, only set if `command` is `mute`.
+Control the group that's playing. Only valid from clients with the `controller` role.
+
+- `command`: string - one of the values listed in `group/update` field `supported_commands`
+- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ## Client → Server: `player/update`
 
-Client has the `player` role to inform the server of a state change.
+Informs the server of player state changes. Only for clients with the `player` role.
 
-Clients with the `player` role must send this immediately after receiving a `server/hello` message and whenever any of these states change.
+Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
-- `state`: string, one of `playing` if there is an active stream or `idle` if there is no active stream.
-- `volume`: number, 0-100.
-- `muted`: boolean.
+- `state`: string - `playing` if active stream, `idle` if no active stream
+- `volume`: number - range 0-100
+- `muted`: boolean - mute state
 
 ## Client → Server: `group/get-list`
 
 Request all groups available to join on the server.
 
+No payload.
+
 ## Server → Client: `group/list`
 
 All groups available to join on the server.
 
-- Include state of each group: playing, paused, or idle.
+- `groups`: object[] - list of available groups
+  - `group_id`: string - group identifier
+  - `name`: string - group name
+  - `state`: string - `playing`, `paused`, or `idle`
+  - `member_count`: number - number of clients in group
 
 ## Client → Server: `group/join`
 
-When a client wants to join a group.
+Join a group.
 
-Response is a `stream/end` message (if the client has an active stream) and a `stream/start` message (if the new group has an active stream).
+- `group_id`: string - identifier of group to join
+
+Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
 
 ## Client → Server: `group/unjoin`
 
-When a client wants to leave group.
+Leave current group.
 
-Response is a `stream/end` message (if the client has an active stream).
+No payload.
+
+Response: `stream/end` (if client has active stream).
 
 <!-- ## Server to Client: `volume/set`
 
@@ -266,19 +284,20 @@ Response is a `stream/end` message (if the client has an active stream).
 
 * `Mute`, bool -->
 
-## Server → Client: binary message
+## Server → Client: Binary Messages
 
-If there is no active stream, binary messages should be rejected.
-Range is inclusive of both start and end.
+Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type.
-- Byte 1-8: timestamp (big endian signed int64).
+- Byte 0: message type (uint8)
+- Bytes 1-8: timestamp (big-endian int64)
 
-### Binary message: audio chunk. Type 1
-- Rest of bytes: encoded audio frame.
-### Binary message: media art. Type 2
-- Rest of bytes: encoded image.
-### Binary message: visualization. Type 3
-- Rest of bytes: visualization data.
+### Type 1: Audio Chunk
+- Rest of bytes: encoded audio frame
+
+### Type 2: Media Art
+- Rest of bytes: encoded image
+
+### Type 3: Visualization
+- Rest of bytes: visualization data
 
 
