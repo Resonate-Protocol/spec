@@ -103,7 +103,7 @@ sequenceDiagram
     end
 ```
 
-## Client to Server: `client/hello`
+## Client → Server: `client/hello`
 
 Information about the Resonate client.
 Players that can output audio should have the role `player`.
@@ -119,8 +119,8 @@ Players that can output audio should have the role `player`.
 - `player_support`: (only if `player` role is set)
   - `support_codecs`: string[], supported codecs listed in order of highest priority to lowest.
   - `support_channels`: number[], number of channels (in order of priority).
-  - `support_sample_rates`: number[], supported sample rates (also in order of priority).
-  - `support_bit_depth`: number[], bit depth (also in order of priority).
+  - `support_sample_rates`: number[], supported sample rates (in order of priority).
+  - `support_bit_depth`: number[], bit depth (in order of priority).
   - `buffer_capacity`: number, buffer capacity size in bytes.
 - `metadata_support`: (only if `metadata` role is set)
   - `support_picture_formats`: string[], supported media art image formats.
@@ -134,29 +134,29 @@ Players that can output audio should have the role `player`.
 <!-- * `support_streams` string\[\] Supported streams (can be media, or voice (not supported now)). -->
 
 
-## Server to Client: `server/hello`
+## Server → Client: `server/hello`
 
 Information about the server
 
 - `server_id`: string, the identifier of the server.
-- `name`: string, the name of the server.
+- `name`: string, the friendly name of the server.
 - `version`: number, the latest supported version of Resonate the server supports.
 
-## Client to Server: `client/time`
+## Client → Server: `client/time`
 
 Sends current internal clock timestamp (in microseconds) to server
 
-- `client_transmitted`: number, clients internal clock, in microseconds.
+- `client_transmitted`: number, clients internal clock timestamp, in microseconds.
 
-## Server to Client: `server/time`
+## Server → Client: `server/time`
 
 Response to the clients time message with info to establish a clock offsets
 
 - `client_transmitted`: number, clients internal clock timestamp received in the `client/time` message.
-- `server_received`: number, timestamp that the server received the client/time message in microseconds.
-- `server_transmitted`: number, timestamp that the server transmitted this message in microseconds.
+- `server_received`: number, timestamp that the server received the client/time message, in microseconds.
+- `server_transmitted`: number, timestamp that the server transmitted this message, in microseconds.
 
-## Server to Client: `stream/start`
+## Server → Client: `stream/start`
 
 When a new stream starts.
 
@@ -171,7 +171,7 @@ When a new stream starts.
 - `metadata`: (Only sent to clients with the `metadata` role)
   - `art_format`: string, format of the encoded image `bmp`, `jpeg`, or `png`.
 
-## Server to Client: `stream/update`
+## Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
@@ -186,12 +186,12 @@ When the format of the messages changes for the ongoing stream. Deltas updating 
 - `metadata`: (Only sent to clients with the `metadata` role)
   - `art_format`: string, format of the encoded image `bmp`, `jpeg`, or `png`.
 
-## Server to Client: `stream/end`
+## Server → Client: `stream/end`
 
 Player should stop streaming and clear buffers - report idle state.
 Visualizer should stop visualizing and clear buffers.
 
-## Server to Client: `session/update`
+## Server → Client: `session/update`
 
 This is deltas. Has to be merged into what exists. If a field is optional and has to be nullified, the value will be set to `null`. The server should null the metadata whenever a session is ended.
 
@@ -212,21 +212,21 @@ This is deltas. Has to be merged into what exists. If a field is optional and ha
   - `repeat`: 'off' | 'one' | 'all'.
   - `shuffle`: boolean.
 
-## Server to Client: `group/update`
+## Server → Client: `group/update`
 - `supported_commands`: string[], array containing a subset of the following group commands: `play` | `pause` | `stop` | `next` | `previous` | `seek` | `volume` | `mute`.
 - `members`: object[].
   - `client_id`: string.
   - `name`: string.
 - `session_id`: string | null, null if no active session.
 
-## Client to Server: `group/command`
+## Client → Server: `group/command`
 
 Control the group that's playing. Only valid from clients that have the `controller` role.
 - `command`: string, one of the values listed in `group/update` field `supported_commands`.
 - `volume`: number | null, volume range: 0-100, optional, only set if `command` is `volume`.
 - `mute`: boolean | null, true to mute, false to unmute, optional, only set if `command` is `mute`.
 
-## Client to Server: `player/update`
+## Client → Server: `player/update`
 
 Client has the `player` role to inform the server of a state change.
 
@@ -236,23 +236,23 @@ Clients with the `player` role must send this immediately after receiving a `ser
 - `volume`: number, 0-100.
 - `muted`: boolean.
 
-## Client to Server: `group/get-list`
+## Client → Server: `group/get-list`
 
 Request all groups available to join on the server.
 
-## Server to Client: `group/list`
+## Server → Client: `group/list`
 
 All groups available to join on the server.
 
 - Include state of each group: playing, paused, or idle.
 
-## Client to Server: `group/join`
+## Client → Server: `group/join`
 
 When a client wants to join a group.
 
 Response is a `stream/end` message (if the client has an active stream) and a `stream/start` message (if the new group has an active stream).
 
-## Client to Server: `group/unjoin`
+## Client → Server: `group/unjoin`
 
 When a client wants to leave group.
 
@@ -266,7 +266,7 @@ Response is a `stream/end` message (if the client has an active stream).
 
 * `Mute`, bool -->
 
-## Server to Client: binary message
+## Server → Client: binary message
 
 If there is no active stream, binary messages should be rejected.
 Range is inclusive of both start and end.
