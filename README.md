@@ -106,27 +106,27 @@ sequenceDiagram
 ## Client to Server: `client/hello`
 
 Information about the Resonate client.
-Players that can output audio should have the role `play`.
+Players that can output audio should have the role `player`.
 
 - `client_id` string, to uniquely identify the client for groups and de-duplication
 - `name` string, friendly name of the client
 - `version` number, version that the Resonate client implements
-- `supported_roles` string\[\], at least one of:
-  - `"player"` - Client that outputs audio
-  - `"controller"` - Client that controls a group
-  - `"metadata"` - Client that displays metadata
-  - `"visualizer"` - Client that visualizes audio
-- `player_support`: (only if `"play"` role is set)
-  - `support_codecs` string\[\], Supported codecs listed in order of highest priority to lowest
-  - `support_channels` number\[\], Number of channels (in order of priority)
-  - `support_sample_rates` number\[\], Supported sample rates (also in order of priority)
-  - `support_bit_depth` number\[\], Bit depth (also in order of priority)
+- `supported_roles` string[], at least one of:
+  - `player` - Client that outputs audio
+  - `controller` - Client that controls a group
+  - `metadata` - Client that displays metadata
+  - `visualizer` - Client that visualizes audio
+- `player_support`: (only if `player` role is set)
+  - `support_codecs` string[], Supported codecs listed in order of highest priority to lowest
+  - `support_channels` number[], Number of channels (in order of priority)
+  - `support_sample_rates` number[], Supported sample rates (also in order of priority)
+  - `support_bit_depth` number[], Bit depth (also in order of priority)
   - `buffer_capacity` number, Buffer capacity size in bytes
-- `metadata_support`: (only if `"metadata"` role is set)
-  - `support_picture_formats` string\[\], Supported media art image formats
+- `metadata_support`: (only if `metadata` role is set)
+  - `support_picture_formats` string[], Supported media art image formats
   - `media_width` number | null (null to receive original size)
   - `media_height` number | null (null to receive original size)
-- `visualizer_support`: (only if `"visual"` role is set)
+- `visualizer_support`: (only if `visualizer` role is set)
   - Desired FFT details (to be determined)
   - `buffer_capacity` number, Buffer capacity size in bytes
 
@@ -160,31 +160,31 @@ Response to the clients time message with info to establish a clock offsets
 
 When a new stream starts.
 
-- `player`: (Only sent to clients with the `"player"` role)
+- `player`: (Only sent to clients with the `player` role)
   - `codec`, string: codec to be used
   - `sample_rate`: number, sample rate to be used
   - `channels`, number: channels to be used
   - `bit_depth`, number: bit depth to be used
   - `codec_header`, Base64 string | null: Codec header (if necessary; e.g., FLAC)
-- `visualizer`: (Only sent to clients with the `"visualizer"` role)
+- `visualizer`: (Only sent to clients with the `visualizer` role)
   - FFT details (to be determined)
-- `metadata`: (Only sent to clients with the `"metadata"` role)
-  - `art_format`, string: format of the encoded image `"bmp"`, `"jpeg"`, or `"png"`
+- `metadata`: (Only sent to clients with the `metadata` role)
+  - `art_format`, string: format of the encoded image `bmp`, `jpeg`, or `png`
 
 ## Server to Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields
 
-- `player`: (Only sent to clients with the `"player"` role)
+- `player`: (Only sent to clients with the `player` role)
   - `codec`, string: codec to be used
   - `sample_rate`: number, sample rate to be used
   - `channels`, number: channels to be used
   - `bit_depth`, number: bit depth to be used
   - `codec_header`, Base64 string | null: Codec header (if necessary; e.g., FLAC)
-- `visualizer`: (Only sent to clients with the `"visualizer"` role)
+- `visualizer`: (Only sent to clients with the `visualizer` role)
   - FFT details (to be determined)
-- `metadata`: (Only sent to clients with the `"metadata"` role)
-  - `art_format`, string: format of the encoded image `"bmp"`, `"jpeg"`, or `"png"`
+- `metadata`: (Only sent to clients with the `metadata` role)
+  - `art_format`, string: format of the encoded image `bmp`, `jpeg`, or `png`
 
 ## Server to Client: `stream/end`
 
@@ -196,8 +196,8 @@ Visualizer should stop visualizing and clear bufers
 This is deltas. Has to be merged into what exists. If a field is optional and has to be nullified, the value will be set to `null`. The server should null the metadata whenever a session is ended
 
 - `group_id`
-- `playback_state` (optional, only sent to clients with "controller" or "metadata" roles)
-- `metadata` (optional, only sent to clients with "metadata" role)
+- `playback_state` (optional, only sent to clients with `controller` or `metadata` roles)
+- `metadata` (optional, only sent to clients with `metadata` role)
   - `timestamp` number (server timestamp) for when this metadata is valid
   - `title` string; optional
   - `artist` string; optional
@@ -209,30 +209,30 @@ This is deltas. Has to be merged into what exists. If a field is optional and ha
   - `track_progress` number (in seconds); optional
   - `track_duration` number (in seconds); optional
   - `playback_speed` number (speed factor); optional
-  - `repeat` "off" | "one" | "all";
+  - `repeat` `off` | `one` | `all`;
   - `shuffle` boolean;
 
 ## Server to Client: `group/update`
-- `supported_commands` string\[\]: array containing a subset of the following group comamnds: "play" | "pause" | "stop" | "next" | "previous" | "seek" | "volume" | "mute"
-- `members` \[\]:
+- `supported_commands` string[]: array containing a subset of the following group commands: `play` | `pause` | `stop` | `next` | `previous` | `seek` | `volume` | `mute`
+- `members` []:
   - `client_id` - string
   - `name` - string
 - `session_id` - string | null; null if no active session
 
 ## Client to Server: `group/command`
 
-Control the group that's playing. Only valid from clients that have the `"controller"` role.
+Control the group that's playing. Only valid from clients that have the `controller` role.
 - `command` string: one of the values listed in `group/update` field `supported_commands`
-- `volume`, number: Volume range: 0-100 (integer); optional, only set if `command` is `"volume"`
-- `mute`, bolean: True to mute, false to unmute; optional, only set if `command` is `"mute"`
+- `volume`, number: Volume range: 0-100 (integer); optional, only set if `command` is `volume`
+- `mute`, boolean: True to mute, false to unmute; optional, only set if `command` is `mute`
 
 ## Client to Server: `player/update`
 
-Client has the `"player"` role to inform the server of a state change.
+Client has the `player` role to inform the server of a state change.
 
-Clients with the `"player"` role must send this immediately after receiving a `server/hello` message and whenever any of these states change
+Clients with the `player` role must send this immediately after receiving a `server/hello` message and whenever any of these states change
 
-- `state` string: one of `"playing"` if there is an active stream or `"idle"` if there is no active stream
+- `state` string: one of `playing` if there is an active stream or `idle` if there is no active stream
 - `volume` integer 0-100
 - `muted` boolean
 
