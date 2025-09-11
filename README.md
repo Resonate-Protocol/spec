@@ -69,11 +69,13 @@ sequenceDiagram
     Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/hello (server info)
 
-    Client->>Server: client/time (client clock)
-    Server->>Client: server/time (timing + offset info)
-
     alt Player role
-        Client->>Server: player/update (state, volume, muted)
+        Client->>Server: player/update (initial state, volume, muted)
+    end
+
+    loop Continuous clock sync
+        Client->>Server: client/time (client clock)
+        Server->>Client: server/time (timing + offset info)
     end
 
     Client->>Server: group/get-list
@@ -91,13 +93,14 @@ sequenceDiagram
     Server->>Client: group/update (commands, members, session_id)
 
     loop During playback
-        Server->>Client: binary Type 1 (audio chunks)
+        Server->>Client: binary Type 1 (audio chunks with timestamps)
         Server-->>Client: binary Type 2 (media art)
         Server-->>Client: binary Type 3 (visualization data)
     end
 
-    alt Stream format changes
-        Server->>Client: stream/update (format updates)
+    alt Player requests format change
+        Client->>Server: stream/request-format (codec, sample_rate, etc)
+        Server->>Client: stream/update (new format)
     end
 
     alt Controller role
