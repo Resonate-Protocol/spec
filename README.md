@@ -276,6 +276,17 @@ No payload.
 
 Response: `stream/end` (if client has active stream).
 
+## Client → Server: `stream/request-format`
+
+Request different stream format (upgrade or downgrade). Only for clients with the `player` role.
+
+- `codec?`: string - requested codec
+- `sample_rate?`: number - requested sample rate
+- `channels?`: number - requested channels
+- `bit_depth?`: number - requested bit depth
+
+Response: `stream/update` with the new format.
+
 <!-- ## Server to Client: `volume/set`
 
 * `volume`, number: Volume range: 1-100 (integer)
