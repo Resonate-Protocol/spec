@@ -48,50 +48,60 @@ sequenceDiagram
 
     Note over Client,Server: WebSocket connection established
 
-    Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio / Art
+    Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio/Art/Visualization
 
-    Client->>Server: client/hello (device role and capabilities)
+    Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/hello (server info)
 
     Client->>Server: client/time (client clock)
     Server->>Client: server/time (timing + offset info)
 
-    Server->>Client: session/start (start playback session)
-    alt already playing
-        Note over Client: Stop existing session before starting new
+    alt Player role
+        Client->>Server: player/update (state, volume, muted)
     end
-
-    Server->>Client: metadata/update (initial/full or delta metadata)
-    loop During playback
-        Server->>Client: binary Type 1 (audio chunk)
-    end
-
-    Client->>Server: stream/command (play, pause, etc.)
-    Client->>Server: player/state (current physical/API state)
-
-    Server->>Client: session/end (stop playback, cleanup)
 
     Client->>Server: group/get-list
-    Server->>Client: group/list (groups + state)
+    Server->>Client: group/list (available groups + state)
 
-    Client->>Server: group/join
-    Server-->>Client: metadata/update and optional session/end
+    Client->>Server: group/join (join a group)
+    alt Client has active stream
+        Server->>Client: stream/end
+    end
+    alt New group has active stream
+        Server->>Client: stream/start (codec, format details)
+    end
 
-    Client->>Server: group/unjoin
-    Server-->>Client: metadata/update
+    Server->>Client: session/update (group_id, playback_state, metadata)
+    Server->>Client: group/update (commands, members, session_id)
 
-    Server->>Client: volume/set
-    Server->>Client: mute/set
+    loop During playback
+        Server->>Client: binary Type 1 (audio chunks)
+        Server-->>Client: binary Type 2 (media art)
+        Server-->>Client: binary Type 3 (visualization data)
+    end
 
-    alt session active
-        Server->>Client: binary Type 2 (media art)
-    else no session
-        Note over Client: Reject binary message
+    alt Stream format changes
+        Server->>Client: stream/update (format updates)
+    end
+
+    alt Controller role
+        Client->>Server: group/command (play/pause/volume/etc)
+    end
+
+    alt Player role state changes
+        Client->>Server: player/update (state changes)
+    end
+
+    Client->>Server: group/unjoin (leave group)
+    alt Client has active stream
+        Server->>Client: stream/end
+    end
+
+    Server->>Client: stream/end (stop playback)
+    alt Player role
+        Client->>Server: player/update (idle state)
     end
 ```
-
-## Terminology:
-
 
 ## Client to Server: `client/hello`
 
