@@ -90,7 +90,7 @@ sequenceDiagram
     end
 
     Server->>Client: session/update (group_id, playback_state, metadata)
-    Server->>Client: group/update (commands, members, session_id)
+    Server->>Client: group/update (commands, group_volume, members, session_id)
 
     loop During playback
         Server->>Client: binary Type 1 (audio chunks with timestamps)
@@ -242,6 +242,8 @@ Group state update.
   - `client_id`: string - client identifier
   - `name`: string - client friendly name
 - `session_id`: string | null - null if no active session
+- `volume`: number - range 0-100
+- `muted`: boolean - mute state
 
 ## Client → Server: `group/command`
 
