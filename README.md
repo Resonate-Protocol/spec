@@ -364,6 +364,7 @@ The `metadata` object in [`session/update`](#server--client-sessionupdate) has t
   - `track_progress?`: number | null - in seconds
   - `track_duration?`: number | null - in seconds
   - `playback_speed?`: number | null - speed factor
+  - `group_name?`: string | null
   - `repeat?`: 'off' | 'one' | 'all' | null
   - `shuffle?`: boolean | null
 
