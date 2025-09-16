@@ -10,7 +10,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 - **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls Resonate groups
-  - **Metadata** - displays metadata. Has preferred format for cover art
+  - **Metadata** - displays metadata. Has preferred format for cover art and lyrics
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
 - **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
@@ -41,7 +41,7 @@ Message format:
 }
 ```
 
-WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
+WebSocket binary messages are used to send audio chunks, media art, lyric files, and visualization data. The first byte is a uint8 representing the message type.
 
 ## Clock Synchronization
 
@@ -96,6 +96,7 @@ sequenceDiagram
         Server->>Client: binary Type 1 (audio chunks with timestamps)
         Server-->>Client: binary Type 2 (media art)
         Server-->>Client: binary Type 3 (visualization data)
+        Server-->>Client: binary Type 4 (lyric data)
     end
 
     alt Player requests format change
@@ -323,7 +324,7 @@ Group state update.
 
 
 ## Metadata messages
-This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
+This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, lyrics, and playback state. Metadata clients receive session updates with track details. They can optionally receive artwork in their preferred format and resolution or lyrics in their preferred format.
 
 ### Client → Server: `client/hello` metadata support object
 
@@ -333,6 +334,7 @@ The `metadata_support` object in [`client/hello`](#client--server-clienthello) h
   - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
   - `media_width?`: number - max width in pixels (if only width set, scales preserving aspect ratio)
   - `media_height?`: number - max height in pixels (if only height set, scales preserving aspect ratio)
+  - `support_lyric_formats`: string[] - supported lyric formats (empty array if no lyrics desired)
 
 ### Server → Client: `stream/start` metadata object
 
@@ -346,7 +348,8 @@ The `metadata` object in [`stream/start`](#server--client-streamstart) (sent to 
 The `metadata` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `metadata`: object
-  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+  - `art_format?`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+  - `lyric_format?`: 'lrc' | 'dk' | 'src' | 'ttml' - format of the encoded lyrics
 
 ### Server → Client: `session/update` metadata object
 
@@ -359,6 +362,7 @@ The `metadata` object in [`session/update`](#server--client-sessionupdate) has t
   - `album_artist?`: string | null
   - `album?`: string | null
   - `artwork_url?`: string | null
+  - `lyric_url?`: string | null
   - `year?`: number | null
   - `track?`: number | null
   - `track_progress?`: number | null - in seconds
@@ -376,6 +380,17 @@ Binary messages should be rejected if there is no active stream.
 - Rest of bytes: encoded image
 
 The timestamp indicates when this artwork becomes valid for display.
+
+### Server → Client: Lyrics (Binary)
+
+Binary messages should be rejected if there is no active stream.
+
+- Byte 0: message type `4` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
+- Rest of bytes: encoded lyric file
+
+The timestamp indicates when this lyrics becomes valid for display.
+
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
