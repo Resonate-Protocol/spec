@@ -209,28 +209,6 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `support_bit_depth`: number[] - bit depth in priority order
   - `buffer_capacity`: number - buffer capacity size in bytes
 
-### Server → Client: `stream/start` player object
-
-The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
-
-- `player`: object
-  - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
-
-### Server → Client: `stream/update` player object
-
-The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `player`: object
-  - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
-
 ### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
@@ -253,6 +231,28 @@ Request different stream format (upgrade or downgrade). Only for clients with th
 Response: `stream/update` with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+
+### Server → Client: `stream/start` player object
+
+The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `player`: object
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+
+### Server → Client: `stream/update` player object
+
+The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `player`: object
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: Audio Chunks (Binary)
 
