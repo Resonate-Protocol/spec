@@ -9,8 +9,8 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
 - **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Metadata** - displays metadata. Has preferred format for cover art
   - **Controller** - controls Resonate groups
+  - **Metadata** - displays metadata. Has preferred format for cover art
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
 - **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
@@ -169,16 +169,16 @@ Response to the client's time message with info to establish clock offsets.
 When a new stream starts.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
-- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 - `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamstart-metadata-object))
+- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
 ### Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
 - `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamupdate-metadata-object))
+- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
 
 ### Server → Client: `stream/end`
 
@@ -194,63 +194,6 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
 - `group_id`: string - group identifier
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
-
-## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
-
-Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
-
-### Client → Server: `group/get-list`
-
-Request all groups available to join on the server.
-
-No payload.
-
-### Client → Server: `group/join`
-
-Join a group.
-
-- `group_id`: string - identifier of group to join
-
-Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
-
-### Client → Server: `group/unjoin`
-
-Leave current group.
-
-No payload.
-
-Response: `stream/end` (if client has active stream).
-
-### Client → Server: `group/command`
-
-Control the group that's playing. Only valid from clients with the `controller` role.
-
-- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
-- `volume?`: number - volume range 0-100, only set if `command` is `volume`
-- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-
-### Server → Client: `group/list`
-
-All groups available to join on the server.
-
-- `groups`: object[] - list of available groups
-  - `group_id`: string - group identifier
-  - `name`: string - group name
-  - `state`: 'playing' | 'paused' | 'idle'
-  - `member_count`: number - number of clients in group
-
-### Server → Client: `group/update`
-
-Group state update.
-
-- `supported_commands`: string[] - subset of: `play`, `pause`, `stop`, `next`, `previous`, `seek`, `volume`, `mute`
-- `members`: object[] - list of group members
-  - `client_id`: string - client identifier
-  - `name`: string - client friendly name
-- `session_id`: string | null - null if no active session
-- `volume`: number - range 0-100
-- `muted`: boolean - mute state
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
@@ -320,6 +263,64 @@ Binary messages should be rejected if there is no active stream.
 - Rest of bytes: encoded audio frame
 
 The timestamp indicates when the first sample in the chunk should begin playback.
+
+## Controller messages
+This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
+
+Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
+
+### Client → Server: `group/get-list`
+
+Request all groups available to join on the server.
+
+No payload.
+
+### Client → Server: `group/join`
+
+Join a group.
+
+- `group_id`: string - identifier of group to join
+
+Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
+
+### Client → Server: `group/unjoin`
+
+Leave current group.
+
+No payload.
+
+Response: `stream/end` (if client has active stream).
+
+### Client → Server: `group/command`
+
+Control the group that's playing. Only valid from clients with the `controller` role.
+
+- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
+- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+
+### Server → Client: `group/list`
+
+All groups available to join on the server.
+
+- `groups`: object[] - list of available groups
+  - `group_id`: string - group identifier
+  - `name`: string - group name
+  - `state`: 'playing' | 'paused' | 'idle'
+  - `member_count`: number - number of clients in group
+
+### Server → Client: `group/update`
+
+Group state update.
+
+- `supported_commands`: string[] - subset of: `play`, `pause`, `stop`, `next`, `previous`, `seek`, `volume`, `mute`
+- `members`: object[] - list of group members
+  - `client_id`: string - client identifier
+  - `name`: string - client friendly name
+- `session_id`: string | null - null if no active session
+- `volume`: number - range 0-100
+- `muted`: boolean - mute state
+
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
