@@ -123,7 +123,7 @@ sequenceDiagram
 ```
 
 ## Core messages
-This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, and stream lifecycle management. Every Resonate client and server must implement all messages in this section regardless of their specific roles.
+This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, and stream lifecycle management. Every Resonate client and server must implement all messages in this section regardless of their specific roles. Role-specific payload details are documented in their respective role sections.
 
 ### Client → Server: `client/hello`
 
@@ -138,19 +138,9 @@ Players that can output audio should have the role `player`.
   - `controller` - controls a group
   - `metadata` - displays metadata
   - `visualizer` - visualizes audio
-- `player_support?`: object - only if `player` role is set
-  - `support_codecs`: string[] - supported codecs in priority order
-  - `support_channels`: number[] - number of channels in priority order
-  - `support_sample_rates`: number[] - supported sample rates in priority order
-  - `support_bit_depth`: number[] - bit depth in priority order
-  - `buffer_capacity`: number - buffer capacity size in bytes
-- `metadata_support?`: object - only if `metadata` role is set
-  - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
-  - `media_width?`: number - max width in pixels (if only width set, scales preserving aspect ratio)
-  - `media_height?`: number - max height in pixels (if only height set, scales preserving aspect ratio) 
-- `visualizer_support?`: object - only if `visualizer` role is set
-  - Desired FFT details (to be determined)
-  - `buffer_capacity`: number - buffer capacity size in bytes
+- `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
+- `metadata_support?`: object - only if `metadata` role is set ([see metadata support object details](#client--server-clienthello-metadata-support-object))
+- `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
 
 ### Client → Server: `client/time`
 
@@ -178,31 +168,17 @@ Response to the client's time message with info to establish clock offsets.
 
 When a new stream starts.
 
-- `player?`: object - only sent to clients with the `player` role
-  - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
-- `visualizer?`: object - only sent to clients with the `visualizer` role
-  - FFT details (to be determined)
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
-  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+- `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
+- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
+- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamstart-metadata-object))
 
 ### Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
-- `player?`: object - only sent to clients with the `player` role
-  - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
-- `visualizer?`: object - only sent to clients with the `visualizer` role
-  - FFT details (to be determined)
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
-  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+- `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
+- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
+- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamupdate-metadata-object))
 
 ### Server → Client: `stream/end`
 
@@ -217,20 +193,7 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
 
 - `group_id`: string - group identifier
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
-- `metadata?`: object - only sent to clients with `metadata` role
-  - `timestamp`: number - server timestamp for when this metadata is valid
-  - `title?`: string | null
-  - `artist?`: string | null
-  - `album_artist?`: string | null
-  - `album?`: string | null
-  - `artwork_url?`: string | null
-  - `year?`: number | null
-  - `track?`: number | null
-  - `track_progress?`: number | null - in seconds
-  - `track_duration?`: number | null - in seconds
-  - `playback_speed?`: number | null - speed factor
-  - `repeat?`: 'off' | 'one' | 'all' | null
-  - `shuffle?`: boolean | null
+- `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
@@ -292,6 +255,39 @@ Group state update.
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
+### Client → Server: `client/hello` player support object
+
+The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `player_support`: object
+  - `support_codecs`: string[] - supported codecs in priority order
+  - `support_channels`: number[] - number of channels in priority order
+  - `support_sample_rates`: number[] - supported sample rates in priority order
+  - `support_bit_depth`: number[] - bit depth in priority order
+  - `buffer_capacity`: number - buffer capacity size in bytes
+
+### Server → Client: `stream/start` player object
+
+The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `player`: object
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+
+### Server → Client: `stream/update` player object
+
+The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `player`: object
+  - `codec`: string - codec to be used
+  - `sample_rate`: number - sample rate to be used
+  - `channels`: number - channels to be used
+  - `bit_depth`: number - bit depth to be used
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+
 ### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
@@ -328,6 +324,48 @@ The timestamp indicates when the first sample in the chunk should begin playback
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
 
+### Client → Server: `client/hello` metadata support object
+
+The `metadata_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `metadata_support`: object
+  - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
+  - `media_width?`: number - max width in pixels (if only width set, scales preserving aspect ratio)
+  - `media_height?`: number - max height in pixels (if only height set, scales preserving aspect ratio)
+
+### Server → Client: `stream/start` metadata object
+
+The `metadata` object in [`stream/start`](#server--client-streamstart) (sent to clients that specified supported picture formats) has this structure:
+
+- `metadata`: object
+  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+
+### Server → Client: `stream/update` metadata object
+
+The `metadata` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `metadata`: object
+  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+
+### Server → Client: `session/update` metadata object
+
+The `metadata` object in [`session/update`](#server--client-sessionupdate) has this structure:
+
+- `metadata`: object
+  - `timestamp`: number - server timestamp for when this metadata is valid
+  - `title?`: string | null
+  - `artist?`: string | null
+  - `album_artist?`: string | null
+  - `album?`: string | null
+  - `artwork_url?`: string | null
+  - `year?`: number | null
+  - `track?`: number | null
+  - `track_progress?`: number | null - in seconds
+  - `track_duration?`: number | null - in seconds
+  - `playback_speed?`: number | null - speed factor
+  - `repeat?`: 'off' | 'one' | 'all' | null
+  - `shuffle?`: boolean | null
+
 ### Server → Client: Media Art (Binary)
 
 Binary messages should be rejected if there is no active stream.
@@ -340,6 +378,28 @@ The timestamp indicates when this artwork becomes valid for display.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
+
+### Client → Server: `client/hello` visualizer support object
+
+The `visualizer_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `visualizer_support`: object
+  - Desired FFT details (to be determined)
+  - `buffer_capacity`: number - buffer capacity size in bytes
+
+### Server → Client: `stream/start` visualizer object
+
+The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `visualizer`: object
+  - FFT details (to be determined)
+
+### Server → Client: `stream/update` visualizer object
+
+The `visualizer` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `visualizer`: object
+  - FFT details (to be determined)
 
 ### Server → Client: Visualization Data (Binary)
 
