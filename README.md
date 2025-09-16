@@ -122,7 +122,10 @@ sequenceDiagram
     end
 ```
 
-## Client → Server: `client/hello`
+## Core messages
+This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, and stream lifecycle management. Every Resonate client and server must implement all messages in this section regardless of their specific roles.
+
+### Client → Server: `client/hello`
 
 Information about the Resonate client.
 Players that can output audio should have the role `player`.
@@ -149,11 +152,13 @@ Players that can output audio should have the role `player`.
   - Desired FFT details (to be determined)
   - `buffer_capacity`: number - buffer capacity size in bytes
 
+### Client → Server: `client/time`
 
-<!-- * `support_streams` string\[\] Supported streams (can be media, or voice (not supported now)). -->
+Sends current internal clock timestamp (in microseconds) to server.
 
+- `client_transmitted`: number - client's internal clock timestamp in microseconds
 
-## Server → Client: `server/hello`
+### Server → Client: `server/hello`
 
 Information about the server.
 
@@ -161,13 +166,7 @@ Information about the server.
 - `name`: string - friendly name of the server
 - `version`: number - latest supported version of Resonate
 
-## Client → Server: `client/time`
-
-Sends current internal clock timestamp (in microseconds) to server.
-
-- `client_transmitted`: number - client's internal clock timestamp in microseconds
-
-## Server → Client: `server/time`
+### Server → Client: `server/time`
 
 Response to the client's time message with info to establish clock offsets.
 
@@ -175,7 +174,7 @@ Response to the client's time message with info to establish clock offsets.
 - `server_received`: number - timestamp that the server received the client/time message in microseconds
 - `server_transmitted`: number - timestamp that the server transmitted this message in microseconds
 
-## Server → Client: `stream/start`
+### Server → Client: `stream/start`
 
 When a new stream starts.
 
@@ -190,7 +189,7 @@ When a new stream starts.
 - `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
   - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
 
-## Server → Client: `stream/update`
+### Server → Client: `stream/update`
 
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
@@ -205,14 +204,14 @@ When the format of the messages changes for the ongoing stream. Deltas updating 
 - `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats
   - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
 
-## Server → Client: `stream/end`
+### Server → Client: `stream/end`
 
 Player should stop streaming and clear buffers - report idle state.
 Visualizer should stop visualizing and clear buffers.
 
 No payload.
 
-## Server → Client: `session/update`
+### Server → Client: `session/update`
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
@@ -233,7 +232,52 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
   - `repeat?`: 'off' | 'one' | 'all' | null
   - `shuffle?`: boolean | null
 
-## Server → Client: `group/update`
+## Controller messages
+This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
+
+Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
+
+### Client → Server: `group/get-list`
+
+Request all groups available to join on the server.
+
+No payload.
+
+### Client → Server: `group/join`
+
+Join a group.
+
+- `group_id`: string - identifier of group to join
+
+Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
+
+### Client → Server: `group/unjoin`
+
+Leave current group.
+
+No payload.
+
+Response: `stream/end` (if client has active stream).
+
+### Client → Server: `group/command`
+
+Control the group that's playing. Only valid from clients with the `controller` role.
+
+- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
+- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+
+### Server → Client: `group/list`
+
+All groups available to join on the server.
+
+- `groups`: object[] - list of available groups
+  - `group_id`: string - group identifier
+  - `name`: string - group name
+  - `state`: 'playing' | 'paused' | 'idle'
+  - `member_count`: number - number of clients in group
+
+### Server → Client: `group/update`
 
 Group state update.
 
@@ -245,15 +289,10 @@ Group state update.
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
 
-## Client → Server: `group/command`
+## Player messages
+This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
-Control the group that's playing. Only valid from clients with the `controller` role.
-
-- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
-- `volume?`: number - volume range 0-100, only set if `command` is `volume`
-- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-
-## Client → Server: `player/update`
+### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
 
@@ -263,39 +302,7 @@ Must be sent immediately after receiving `server/hello` and whenever any state c
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
 
-## Client → Server: `group/get-list`
-
-Request all groups available to join on the server.
-
-No payload.
-
-## Server → Client: `group/list`
-
-All groups available to join on the server.
-
-- `groups`: object[] - list of available groups
-  - `group_id`: string - group identifier
-  - `name`: string - group name
-  - `state`: 'playing' | 'paused' | 'idle'
-  - `member_count`: number - number of clients in group
-
-## Client → Server: `group/join`
-
-Join a group.
-
-- `group_id`: string - identifier of group to join
-
-Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
-
-## Client → Server: `group/unjoin`
-
-Leave current group.
-
-No payload.
-
-Response: `stream/end` (if client has active stream).
-
-## Client → Server: `stream/request-format`
+### Client → Server: `stream/request-format`
 
 Request different stream format (upgrade or downgrade). Only for clients with the `player` role.
 
@@ -308,21 +315,38 @@ Response: `stream/update` with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
-## Server → Client: Binary Messages
+### Server → Client: Audio Chunks (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type (uint8)
+- Byte 0: message type `1` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
-
-### Type 1: Audio Chunk
 - Rest of bytes: encoded audio frame
-- The timestamp indicates when the first sample in the chunk should begin playback
 
-### Type 2: Media Art
+The timestamp indicates when the first sample in the chunk should begin playback.
+
+## Metadata messages
+This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
+
+### Server → Client: Media Art (Binary)
+
+Binary messages should be rejected if there is no active stream.
+
+- Byte 0: message type `2` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded image
-- The timestamp indicates when this artwork becomes valid for display
 
-### Type 3: Visualization
+The timestamp indicates when this artwork becomes valid for display.
+
+## Visualizer messages
+This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
+
+### Server → Client: Visualization Data (Binary)
+
+Binary messages should be rejected if there is no active stream.
+
+- Byte 0: message type `3` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: visualization data
-- The timestamp indicates when this visualization data corresponds to the audio
+
+The timestamp indicates when this visualization data corresponds to the audio.
