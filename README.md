@@ -18,7 +18,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Establishing a Connection
 
-While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), Resonate requires support for standardized connection establishment. **Servers must support both methods** described below, while **clients must support exactly one**.
+While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), Resonate requires support for standardized connection establishment. **Servers must support both methods** described below, while **clients must support exactly one** (unless the use case falls under the specialized category).
 
 ### Server Initiated Connections
 
