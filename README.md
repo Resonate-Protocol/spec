@@ -208,6 +208,7 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `support_sample_rates`: number[] - supported sample rates in priority order
   - `support_bit_depth`: number[] - bit depth in priority order
   - `buffer_capacity`: number - buffer capacity size in bytes
+  - `supported_commands`: string[] - subset of: `volume`, `mute`
 
 ### Client → Server: `player/update`
 
@@ -237,7 +238,7 @@ Response: `stream/update` with the new format.
 
 Request the player to perform an action, e.g., change volume or mute state.
 
-- `command`: 'volume' | 'mute'
+- `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
