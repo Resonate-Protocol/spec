@@ -212,6 +212,7 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
 ### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
+This message must always be sent after state updates, including when the volume was changed through a `player/command` received from the server or when a volume button was pressed locally.
 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
@@ -231,6 +232,14 @@ Request different stream format (upgrade or downgrade). Only for clients with th
 Response: `stream/update` with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+
+### Server → Client: `player/command`
+
+Request the player to perform an action, e.g., change volume or mute state.
+
+- `command`: 'volume' | 'mute'
+- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ### Server → Client: `stream/start` player object
 
