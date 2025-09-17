@@ -132,6 +132,10 @@ Players that can output audio should have the role `player`.
 
 - `client_id`: string - uniquely identifies the client for groups and de-duplication
 - `name`: string - friendly name of the client
+- `device_info?`: object - optional information about the device
+  - `product_name?`: string - device model/product name
+  - `manufacturer?`: string - device manufacturer name
+  - `software_version?`: string - software version of the client (not the Resonate version)
 - `version`: number - version that the Resonate client implements
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
