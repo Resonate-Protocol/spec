@@ -18,7 +18,9 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Establishing a Connection
 
-While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), Resonate requires support for standardized connection establishment. **Servers must support both methods** described below, while **clients must support exactly one** (unless the use case falls under the specialized category).
+Resonate has two standard ways to establish connections: Server and Client initiated.
+
+Resonate Servers must support both methods described below.
 
 ### Server Initiated Connections
 
@@ -28,6 +30,8 @@ Clients announce their presence via mDNS using:
 - TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+
+**Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
 
 ### Client Initiated Connections
 
@@ -41,6 +45,8 @@ Clients discover the server through mDNS and initiate a WebSocket connection usi
 **Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
 
 **Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+
+While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
 ## Communication
 
