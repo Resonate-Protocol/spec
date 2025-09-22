@@ -36,7 +36,7 @@ The server discovers available clients through mDNS and connects to each client 
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
-- Service type: `_resonate_server._tcp.local.`
+- Service type: `_resonate-server._tcp.local.`
 - Port: The port the Resonate server is listening on (recommended: `8927`)
 - TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
 
