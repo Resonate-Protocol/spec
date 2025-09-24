@@ -313,7 +313,7 @@ All groups available to join on the server.
 
 Group state update.
 
-- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist`
+- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist` | `shuffle`
 - `members`: object[] - list of group members
   - `client_id`: string - client identifier
   - `name`: string - client friendly name
