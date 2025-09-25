@@ -295,7 +295,7 @@ Response: `stream/end` (if client has active stream).
 
 Control the group that's playing. Only valid from clients with the `controller` role.
 
-- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist` | `shuffle` - must be one of the values listed in `group/update` field `supported_commands`
+- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist` | `shuffle` | `unshuffle` - must be one of the values listed in `group/update` field `supported_commands`
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -313,7 +313,7 @@ All groups available to join on the server.
 
 Group state update.
 
-- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist` | `shuffle`
+- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `clear_playlist` | `shuffle` | `unshuffle` 
 - `members`: object[] - list of group members
   - `client_id`: string - client identifier
   - `name`: string - client friendly name
