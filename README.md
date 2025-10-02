@@ -9,7 +9,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
 - **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Controller** - controls Resonate groups
+  - **Controller** - controls the Resonate group this client is part of
   - **Metadata** - displays metadata. Has preferred format for cover art
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
@@ -159,7 +159,7 @@ Players that can output audio should have the role `player`.
 - `version`: number - version that the Resonate client implements
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
-  - `controller` - controls a group
+  - `controller` - controls the current Resonate group
   - `metadata` - displays metadata
   - `visualizer` - visualizes audio
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
@@ -299,31 +299,9 @@ Binary messages should be rejected if there is no active stream.
 The timestamp indicates when the first sample in the chunk should begin playback.
 
 ## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
+This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and basic switching between groups.
 
 Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
-
-### Client → Server: `group/get-list`
-
-Request all groups available to join on the server.
-
-No payload.
-
-### Client → Server: `group/join`
-
-Join a group.
-
-- `group_id`: string - identifier of group to join
-
-Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
-
-### Client → Server: `group/unjoin`
-
-Leave current group.
-
-No payload.
-
-Response: `stream/end` (if client has active stream).
 
 ### Client → Server: `group/command`
 
@@ -333,24 +311,22 @@ Control the group that's playing. Only valid from clients with the `controller` 
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
-### Server → Client: `group/list`
+### Client → Server: `group/switch`
 
-All groups available to join on the server.
+Request the server to switch this client to a different group.
 
-- `groups`: object[] - list of available groups
-  - `group_id`: string - group identifier
-  - `name`: string - group name
-  - `state`: 'playing' | 'paused' | 'idle'
-  - `member_count`: number - number of clients in group
+For a client with the `player` role this will:
+- Cycle the group this client is part of through all combinations of: all other playing groups, all other playing players, and just itself
+For a client without the `player` role this will:
+- Cycle the group this client is part of through all combinations of: all other playing groups, and all other playing players
+
+No payload.
 
 ### Server → Client: `group/update`
 
 Group state update.
 
 - `supported_commands`: string[] - subset of: `play`, `pause`, `stop`, `next`, `previous`, `seek`, `volume`, `mute`
-- `members`: object[] - list of group members
-  - `client_id`: string - client identifier
-  - `name`: string - client friendly name
 - `session_id`: string | null - null if no active session
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
