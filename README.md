@@ -18,11 +18,35 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Establishing a Connection
 
-Clients announce their presence via mDNS using the service type `_resonate._tcp`.
+Resonate has two standard ways to establish connections: Server and Client initiated.
 
-Resonate communicates over WebSockets on the path `/resonate`. Recommended port is `8927`.
+Resonate Servers must support both methods described below.
 
-Resonate servers support connections from browsers, mobile apps, and other WebSocket-capable clients.
+### Server Initiated Connections
+
+Clients announce their presence via mDNS using:
+- Service type: `_resonate._tcp.local.`
+- Port: The port the Resonate client is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+
+The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+
+**Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
+
+### Client Initiated Connections
+
+If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
+- Service type: `_resonate-server._tcp.local.`
+- Port: The port the Resonate server is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+
+Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
+
+**Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
+
+**Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+
+While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
 ## Communication
 
