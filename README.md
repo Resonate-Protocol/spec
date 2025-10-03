@@ -9,7 +9,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
 - **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Controller** - controls Resonate groups
+  - **Controller** - controls the Resonate group this client is part of
   - **Metadata** - displays metadata. Has preferred format for cover art
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
@@ -18,11 +18,35 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Establishing a Connection
 
-Clients announce their presence via mDNS using the service type `_resonate._tcp`.
+Resonate has two standard ways to establish connections: Server and Client initiated.
 
-Resonate communicates over WebSockets on the path `/resonate`. Recommended port is `8927`.
+Resonate Servers must support both methods described below.
 
-Resonate servers support connections from browsers, mobile apps, and other WebSocket-capable clients.
+### Server Initiated Connections
+
+Clients announce their presence via mDNS using:
+- Service type: `_resonate._tcp.local.`
+- Port: The port the Resonate client is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+
+The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+
+**Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
+
+### Client Initiated Connections
+
+If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
+- Service type: `_resonate-server._tcp.local.`
+- Port: The port the Resonate server is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+
+Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
+
+**Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
+
+**Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+
+While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
 ## Communication
 
@@ -132,10 +156,14 @@ Players that can output audio should have the role `player`.
 
 - `client_id`: string - uniquely identifies the client for groups and de-duplication
 - `name`: string - friendly name of the client
+- `device_info?`: object - optional information about the device
+  - `product_name?`: string - device model/product name
+  - `manufacturer?`: string - device manufacturer name
+  - `software_version?`: string - software version of the client (not the Resonate version)
 - `version`: number - version that the Resonate client implements
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
-  - `controller` - controls a group
+  - `controller` - controls the current Resonate group
   - `metadata` - displays metadata
   - `visualizer` - visualizes audio
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
@@ -208,10 +236,12 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `support_sample_rates`: number[] - supported sample rates in priority order
   - `support_bit_depth`: number[] - bit depth in priority order
   - `buffer_capacity`: number - buffer capacity size in bytes
+  - `supported_commands`: string[] - subset of: `volume`, `mute`
 
 ### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
+This message must always be sent after state updates, including when the volume was changed through a `player/command` received from the server or when a volume button was pressed locally.
 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
@@ -231,6 +261,14 @@ Request different stream format (upgrade or downgrade). Only for clients with th
 Response: `stream/update` with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+
+### Server → Client: `player/command`
+
+Request the player to perform an action, e.g., change volume or mute state.
+
+- `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
+- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ### Server → Client: `stream/start` player object
 
@@ -265,31 +303,9 @@ Binary messages should be rejected if there is no active stream.
 The timestamp indicates when the first sample in the chunk should begin playback.
 
 ## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables remote control of groups and playback. Controller clients can browse available groups, join/leave groups, and send playback commands like play, pause, volume control, and track navigation.
+This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and basic switching between groups.
 
 Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
-
-### Client → Server: `group/get-list`
-
-Request all groups available to join on the server.
-
-No payload.
-
-### Client → Server: `group/join`
-
-Join a group.
-
-- `group_id`: string - identifier of group to join
-
-Response: `stream/end` (if client has active stream) followed by `stream/start` (if new group has active stream).
-
-### Client → Server: `group/unjoin`
-
-Leave current group.
-
-No payload.
-
-Response: `stream/end` (if client has active stream).
 
 ### Client → Server: `group/command`
 
@@ -299,24 +315,22 @@ Control the group that's playing. Only valid from clients with the `controller` 
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
-### Server → Client: `group/list`
+### Client → Server: `group/switch`
 
-All groups available to join on the server.
+Request the server to switch this client to a different group.
 
-- `groups`: object[] - list of available groups
-  - `group_id`: string - group identifier
-  - `name`: string - group name
-  - `state`: 'playing' | 'paused' | 'idle'
-  - `member_count`: number - number of clients in group
+For a client with the `player` role this will:
+- Cycle the group this client is part of through all combinations of: all other playing groups, all other playing players, and just itself
+For a client without the `player` role this will:
+- Cycle the group this client is part of through all combinations of: all other playing groups, and all other playing players
+
+No payload.
 
 ### Server → Client: `group/update`
 
 Group state update.
 
 - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
-- `members`: object[] - list of group members
-  - `client_id`: string - client identifier
-  - `name`: string - client friendly name
 - `session_id`: string | null - null if no active session
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
