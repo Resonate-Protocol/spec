@@ -311,7 +311,7 @@ Every client which lists the `controller` role in the `supported_roles` of the `
 
 Control the group that's playing. Only valid from clients with the `controller` role.
 
-- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'seek' | 'volume' | 'mute' - must be one of the values listed in `group/update` field `supported_commands`
+- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` - must be one of the values listed in `group/update` field `supported_commands`
 - `volume?`: number - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -330,7 +330,7 @@ No payload.
 
 Group state update.
 
-- `supported_commands`: string[] - subset of: `play`, `pause`, `stop`, `next`, `previous`, `seek`, `volume`, `mute`
+- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
 - `session_id`: string | null - null if no active session
 - `volume`: number - range 0-100
 - `muted`: boolean - mute state
