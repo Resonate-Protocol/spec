@@ -241,10 +241,11 @@ This section describes messages specific to clients with the `player` role, whic
 The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `player_support`: object
-  - `support_codecs`: string[] - supported codecs in priority order
-  - `support_channels`: integer[] - number of channels in priority order
-  - `support_sample_rates`: integer[] - supported sample rates in priority order
-  - `support_bit_depth`: integer[] - bit depth in priority order
+  - `support_formats`: object[] - list of supported audio formats in priority order (first is preferred)
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
+    - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
+    - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer, that are yet to be played
   - `supported_commands`: string[] - subset of: `volume`, `mute`
 
@@ -263,10 +264,10 @@ Must be sent immediately after receiving `server/hello` and whenever any state c
 
 Request different stream format (upgrade or downgrade). Only for clients with the `player` role.
 
-- `codec?`: string - requested codec
-- `sample_rate?`: integer - requested sample rate
-- `channels?`: integer - requested channels
-- `bit_depth?`: integer - requested bit depth
+- `codec?`: 'opus' | 'flac' | 'pcm' - requested codec identifier
+- `channels?`: integer - requested number of channels (e.g., 1 = mono, 2 = stereo)
+- `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
+- `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
 Response: `stream/update` with the new format.
 
