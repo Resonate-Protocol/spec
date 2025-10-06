@@ -173,6 +173,7 @@ Players that can output audio should have the role `player`.
 ### Client → Server: `client/time`
 
 Sends current internal clock timestamp (in microseconds) to server.
+Once received by the server, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
 
 - `client_transmitted`: number - client's internal clock timestamp in microseconds
 
@@ -186,7 +187,9 @@ Information about the server.
 
 ### Server → Client: `server/time`
 
-Response to the client's time message with info to establish clock offsets.
+Response to the [`client/time`](#client--server-clienttime) message with timestamps to establish clock offsets.
+
+For synchronization, all timing is relative to the server's monotonic clock. These timestamps have microsecond precision and are not necessarily based on epoch time.
 
 - `client_transmitted`: number - client's internal clock timestamp received in the `client/time` message
 - `server_received`: number - timestamp that the server received the client/time message in microseconds
