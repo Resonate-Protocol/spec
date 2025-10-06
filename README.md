@@ -186,7 +186,7 @@ Once received by the server, the server responds with a [`server/time`](#server-
 
 Response to the [`client/hello`](#client--server-clienthello) message with information about the server.
 
-Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime)).
+Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`player/update`](#client--server-playerupdate) message if the client has the `player` role).
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
@@ -251,7 +251,7 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
 ### Client → Server: `player/update`
 
 Informs the server of player state changes. Only for clients with the `player` role.
-This message must always be sent after state updates, including when the volume was changed through a `player/command` received from the server or when a volume button was pressed locally.
+This message must always be sent after establishing the connection and state updates, including when the volume was changed through a `player/command` received from the server or when a volume button was pressed locally.
 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
