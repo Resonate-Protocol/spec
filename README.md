@@ -229,7 +229,6 @@ No payload.
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
-- `group_id`: string - group identifier
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
 
@@ -239,6 +238,7 @@ State update of the group this client is part of.
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
+- `group_id?`: string - group identifier
 - `controller?`: object - only sent to clients with `controller` role ([see controller object details](#server--client-groupupdate-controller-object))
 
 
@@ -353,6 +353,7 @@ The `controller` object in [`group/update`](#server--client-groupupdate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle`
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
+
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
