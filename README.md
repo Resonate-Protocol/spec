@@ -233,6 +233,15 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
 
+### Server → Client: `group/update`
+
+State update of the group this client is part of.
+
+Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
+
+- `controller?`: object - only sent to clients with `controller` role ([see controller object details](#server--client-groupupdate-controller-object))
+
+
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
@@ -336,14 +345,14 @@ For a client without the `player` role this will:
 
 No payload.
 
-### Server → Client: `group/update`
+### Server → Client: `group/update` controller object
 
-Group state update.
+The `controller` object in [`group/update`](#server--client-groupupdate) has this structure:
 
-- `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
-- `volume`: integer - range 0-100
-- `muted`: boolean - mute state
-
+- `controller`: object
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
+  - `volume`: integer - volume of the whole group, range 0-100
+  - `muted`: boolean - mute state of the whole group
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
