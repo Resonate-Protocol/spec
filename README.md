@@ -52,6 +52,9 @@ While custom connection methods are possible for specialized use cases (like rem
 
 Once the connection is established, Client and Server are going to talk.
 
+The first message must always be a `client/hello` message from the client to the server.
+Once the server receives this message, it responds with a `server/hello` message. Before this handshake is complete, no other messages should be sent.
+
 WebSocket text messages are used to send JSON payloads.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
@@ -151,7 +154,9 @@ This section describes the fundamental messages that establish communication bet
 
 ### Client → Server: `client/hello`
 
-Information about the Resonate client.
+First message sent by the client after establishing the WebSocket connection. Contains information about the client's capabilities and roles.
+This message will be followed by a [`server/hello`](#server--client-serverhello) message from the server.
+
 Players that can output audio should have the role `player`.
 
 - `client_id`: string - uniquely identifies the client for groups and de-duplication
@@ -179,7 +184,9 @@ Once received by the server, the server responds with a [`server/time`](#server-
 
 ### Server → Client: `server/hello`
 
-Information about the server.
+Response to the [`client/hello`](#client--server-clienthello) message with information about the server.
+
+Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime)).
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
