@@ -376,7 +376,7 @@ The `metadata` object in [`stream/update`](#server--client-streamupdate) has thi
 
 The `metadata` object in [`session/update`](#server--client-sessionupdate) has this structure:
 
-Clients can calculate the current track position at any time using the last received values: `current_track_progress = metadata.track_progress + (current_time - metadata.timestamp) / 1000 * metadata.playback_speed`
+Clients can calculate the current track position at any time using the last received values: `current_track_progress_ms = max(min(metadata.track_progress + (current_time - metadata.timestamp) / 1000 * metadata.playback_speed, metadata.track_duration), 0)`
 
 - `metadata`: object
   - `timestamp`: integer - server clock time in microseconds for when this metadata is valid
