@@ -384,7 +384,7 @@ Clients can calculate the current track position at any time using the last rece
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
   - `album?`: string | null - album name
-  - `artwork_url?`: string | null - URL to artwork image
+  - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
   - `year?`: integer | null - release year
   - `track?`: integer | null - track number
   - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
