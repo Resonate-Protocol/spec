@@ -117,7 +117,7 @@ sequenceDiagram
     end
 
     Server->>Client: session/update (group_id, playback_state, metadata)
-    Server->>Client: group/update (commands, group_volume, members, session_id)
+    Server->>Client: group/update (commands, group_volume, members)
 
     loop During playback
         Server->>Client: binary Type 1 (audio chunks with timestamps)
@@ -341,7 +341,6 @@ No payload.
 Group state update.
 
 - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
-- `session_id`: string | null - null if no active session
 - `volume`: integer - range 0-100
 - `muted`: boolean - mute state
 
