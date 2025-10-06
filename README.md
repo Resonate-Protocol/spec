@@ -303,7 +303,7 @@ Binary messages should be rejected if there is no active stream.
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first sample in the chunk should begin playback.
+The timestamp indicates when exactly the first sample in the chunk should leave the device.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and basic switching between groups.
