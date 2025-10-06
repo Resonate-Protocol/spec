@@ -389,7 +389,7 @@ Clients can calculate the current track position at any time using the last rece
   - `track?`: integer | null - track number
   - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
   - `track_duration?`: integer | null - total track length in milliseconds
-  - `playback_speed?`: float | null - playback speed multiplier (1.0 = normal speed)
+  - `playback_speed?`: integer | null - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed)
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
