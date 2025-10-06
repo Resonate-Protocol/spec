@@ -160,7 +160,7 @@ Players that can output audio should have the role `player`.
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Resonate version)
-- `version`: number - version that the Resonate client implements
+- `version`: integer - version that the Resonate client implements
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
   - `controller` - controls the current Resonate group
@@ -175,7 +175,7 @@ Players that can output audio should have the role `player`.
 Sends current internal clock timestamp (in microseconds) to server.
 Once received by the server, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
 
-- `client_transmitted`: number - client's internal clock timestamp in microseconds
+- `client_transmitted`: integer - client's internal clock timestamp in microseconds
 
 ### Server → Client: `server/hello`
 
@@ -183,7 +183,7 @@ Information about the server.
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
-- `version`: number - latest supported version of Resonate
+- `version`: integer - latest supported version of Resonate
 
 ### Server → Client: `server/time`
 
@@ -191,9 +191,9 @@ Response to the [`client/time`](#client--server-clienttime) message with timesta
 
 For synchronization, all timing is relative to the server's monotonic clock. These timestamps have microsecond precision and are not necessarily based on epoch time.
 
-- `client_transmitted`: number - client's internal clock timestamp received in the `client/time` message
-- `server_received`: number - timestamp that the server received the `client/time` message in microseconds
-- `server_transmitted`: number - timestamp that the server transmitted this message in microseconds
+- `client_transmitted`: integer - client's internal clock timestamp received in the `client/time` message
+- `server_received`: integer - timestamp that the server received the `client/time` message in microseconds
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 
 ### Server → Client: `stream/start`
 
@@ -235,10 +235,10 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
 
 - `player_support`: object
   - `support_codecs`: string[] - supported codecs in priority order
-  - `support_channels`: number[] - number of channels in priority order
-  - `support_sample_rates`: number[] - supported sample rates in priority order
-  - `support_bit_depth`: number[] - bit depth in priority order
-  - `buffer_capacity`: number - buffer capacity size in bytes
+  - `support_channels`: integer[] - number of channels in priority order
+  - `support_sample_rates`: integer[] - supported sample rates in priority order
+  - `support_bit_depth`: integer[] - bit depth in priority order
+  - `buffer_capacity`: integer - buffer capacity size in bytes
   - `supported_commands`: string[] - subset of: `volume`, `mute`
 
 ### Client → Server: `player/update`
@@ -249,7 +249,7 @@ This message must always be sent after state updates, including when the volume 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
 - `state`: 'playing' | 'idle' - playing if active stream, idle if no active stream
-- `volume`: number - range 0-100
+- `volume`: integer - range 0-100
 - `muted`: boolean - mute state
 
 ### Client → Server: `stream/request-format`
@@ -257,9 +257,9 @@ Must be sent immediately after receiving `server/hello` and whenever any state c
 Request different stream format (upgrade or downgrade). Only for clients with the `player` role.
 
 - `codec?`: string - requested codec
-- `sample_rate?`: number - requested sample rate
-- `channels?`: number - requested channels
-- `bit_depth?`: number - requested bit depth
+- `sample_rate?`: integer - requested sample rate
+- `channels?`: integer - requested channels
+- `bit_depth?`: integer - requested bit depth
 
 Response: `stream/update` with the new format.
 
@@ -270,7 +270,7 @@ Response: `stream/update` with the new format.
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
-- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `volume?`: integer - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ### Server → Client: `stream/start` player object
@@ -279,9 +279,9 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
 
 - `player`: object
   - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
+  - `sample_rate`: integer - sample rate to be used
+  - `channels`: integer - channels to be used
+  - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: `stream/update` player object
@@ -290,9 +290,9 @@ The `player` object in [`stream/update`](#server--client-streamupdate) has this 
 
 - `player`: object
   - `codec`: string - codec to be used
-  - `sample_rate`: number - sample rate to be used
-  - `channels`: number - channels to be used
-  - `bit_depth`: number - bit depth to be used
+  - `sample_rate`: integer - sample rate to be used
+  - `channels`: integer - channels to be used
+  - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: Audio Chunks (Binary)
@@ -315,7 +315,7 @@ Every client which lists the `controller` role in the `supported_roles` of the `
 Control the group that's playing. Only valid from clients with the `controller` role.
 
 - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` - must be one of the values listed in `group/update` field `supported_commands`
-- `volume?`: number - volume range 0-100, only set if `command` is `volume`
+- `volume?`: integer - volume range 0-100, only set if `command` is `volume`
 - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ### Client → Server: `group/switch`
@@ -335,7 +335,7 @@ Group state update.
 
 - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` 
 - `session_id`: string | null - null if no active session
-- `volume`: number - range 0-100
+- `volume`: integer - range 0-100
 - `muted`: boolean - mute state
 
 
@@ -348,8 +348,8 @@ The `metadata_support` object in [`client/hello`](#client--server-clienthello) h
 
 - `metadata_support`: object
   - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
-  - `media_width?`: number - max width in pixels (if only width set, scales preserving aspect ratio)
-  - `media_height?`: number - max height in pixels (if only height set, scales preserving aspect ratio)
+  - `media_width?`: integer - max width in pixels (if only width set, scales preserving aspect ratio)
+  - `media_height?`: integer - max height in pixels (if only height set, scales preserving aspect ratio)
 
 ### Server → Client: `stream/start` metadata object
 
@@ -372,17 +372,17 @@ The `metadata` object in [`session/update`](#server--client-sessionupdate) has t
 Clients can calculate the current track position at any time using the last received values: `current_track_progress = metadata.track_progress + (current_time - metadata.timestamp) * metadata.playback_speed`
 
 - `metadata`: object
-  - `timestamp`: number - server timestamp for when this metadata is valid
+  - `timestamp`: integer - server timestamp for when this metadata is valid
   - `title?`: string | null - track title
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
   - `album?`: string | null - album name
   - `artwork_url?`: string | null - URL to artwork image
-  - `year?`: number | null - release year
-  - `track?`: number | null - track number
-  - `track_progress?`: number | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
-  - `track_duration?`: number | null - total track length in milliseconds
-  - `playback_speed?`: number | null - playback speed multiplier (1.0 = normal speed)
+  - `year?`: integer | null - release year
+  - `track?`: integer | null - track number
+  - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
+  - `track_duration?`: integer | null - total track length in milliseconds
+  - `playback_speed?`: float | null - playback speed multiplier (1.0 = normal speed)
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
@@ -405,7 +405,7 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 
 - `visualizer_support`: object
   - Desired FFT details (to be determined)
-  - `buffer_capacity`: number - buffer capacity size in bytes
+  - `buffer_capacity`: integer - buffer capacity size in bytes
 
 ### Server → Client: `stream/start` visualizer object
 
