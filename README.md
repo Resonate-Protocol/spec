@@ -371,18 +371,18 @@ The `metadata` object in [`session/update`](#server--client-sessionupdate) has t
 
 - `metadata`: object
   - `timestamp`: number - server timestamp for when this metadata is valid
-  - `title?`: string | null
-  - `artist?`: string | null
-  - `album_artist?`: string | null
-  - `album?`: string | null
-  - `artwork_url?`: string | null
-  - `year?`: number | null
-  - `track?`: number | null
-  - `track_progress?`: number | null - in seconds
-  - `track_duration?`: number | null - in seconds
-  - `playback_speed?`: number | null - speed factor
-  - `repeat?`: 'off' | 'one' | 'all' | null
-  - `shuffle?`: boolean | null
+  - `title?`: string | null - track title
+  - `artist?`: string | null - primary artist(s)
+  - `album_artist?`: string | null - album artist(s)
+  - `album?`: string | null - album name
+  - `artwork_url?`: string | null - URL to artwork image
+  - `year?`: number | null - release year
+  - `track?`: number | null - track number
+  - `track_progress?`: number | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
+  - `track_duration?`: number | null - total track length in milliseconds
+  - `playback_speed?`: number | null - playback speed multiplier (1.0 = normal speed)
+  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
+  - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 ### Server → Client: Media Art (Binary)
 
