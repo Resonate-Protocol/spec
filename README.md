@@ -27,7 +27,10 @@ Resonate Servers must support both methods described below.
 Clients announce their presence via mDNS using:
 - Service type: `_resonate._tcp.local.`
 - Port: The port the Resonate client is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+- TXT records:
+  - `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+  - `client_id` key specifying the unique client identifier, same as used in the `client/hello` message
+  - `name` key specifying a friendly name for the client, same as used in the `client/hello` message
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
