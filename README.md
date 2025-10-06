@@ -245,7 +245,7 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `support_channels`: integer[] - number of channels in priority order
   - `support_sample_rates`: integer[] - supported sample rates in priority order
   - `support_bit_depth`: integer[] - bit depth in priority order
-  - `buffer_capacity`: integer - buffer capacity size in bytes
+  - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer, that are yet to be played
   - `supported_commands`: string[] - subset of: `volume`, `mute`
 
 ### Client → Server: `player/update`
@@ -412,7 +412,7 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 
 - `visualizer_support`: object
   - Desired FFT details (to be determined)
-  - `buffer_capacity`: integer - buffer capacity size in bytes
+  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer, that are yet to be displayed
 
 ### Server → Client: `stream/start` visualizer object
 
