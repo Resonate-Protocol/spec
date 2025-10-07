@@ -402,6 +402,8 @@ Binary messages should be rejected if there is no active stream.
 
 The timestamp indicates when this artwork becomes valid for display.
 
+**Clearing artwork:** To clear the currently displayed artwork, the server sends an empty binary message (only the message type byte and timestamp, with no image data).
+
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
 
