@@ -382,55 +382,71 @@ Clients can calculate the current track position at any time using the last rece
 ## Artwork messages
 This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
 
+**Channels:** Artwork clients can support 1-4 independent channels, allowing them to display multiple related images. For example, a device could display album artwork on one channel while simultaneously showing artist photos or background images on other channels. Each channel operates independently with its own format, resolution, and source type (album or artist artwork).
+
 ### Client → Server: `client/hello` artwork support object
 
 The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `artwork_support`: object
-  - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
-  - `media_width`: integer - max width in pixels
-  - `media_height`: integer - max height in pixels
+  - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
+    - `source`: 'album' | 'artist' - artwork source type
+    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
+    - `media_width`: integer - max width in pixels
+    - `media_height`: integer - max height in pixels
 
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio.
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 2), `channels[1]` is channel 1 (binary message type 3), etc.
 
 ### Client → Server: `stream/request-format` artwork object
 
 The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
 
 - `artwork`: object
-  - `art_format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
-  - `media_width?`: integer - requested max width in pixels
-  - `media_height?`: integer - requested max height in pixels
+  - `channels?`: object[] - configuration for artwork channels, array index is the channel number
+    - `source?`: 'album' | 'artist' - artwork source type
+    - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
+    - `media_width?`: integer - requested max width in pixels
+    - `media_height?`: integer - requested max height in pixels
 
 ### Server → Client: `stream/start` artwork object
 
 The `artwork` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `artwork`: object
-  - `art_format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
-  - `art_width`: integer - width in pixels of the encoded image
-  - `art_height`: integer - height in pixels of the encoded image
+  - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
+    - `source`: 'album' | 'artist' - artwork source type
+    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `width`: integer - width in pixels of the encoded image
+    - `height`: integer - height in pixels of the encoded image
 
 ### Server → Client: `stream/update` artwork object
 
 The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `artwork`: object
-  - `art_format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
-  - `art_width?`: integer - width in pixels of the encoded image
-  - `art_height?`: integer - height in pixels of the encoded image
+  - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
+    - `source?`: 'album' | 'artist' - artwork source type
+    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `width?`: integer - width in pixels of the encoded image
+    - `height?`: integer - height in pixels of the encoded image
 
 ### Server → Client: Artwork (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `2` (uint8)
+- Byte 0: message type `2`-`5` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded image
 
+The message type determines which artwork channel this image is for:
+- Type `2`: Channel 0
+- Type `3`: Channel 1
+- Type `4`: Channel 2
+- Type `5`: Channel 3
+
 The timestamp indicates when this artwork becomes valid for display.
 
-**Clearing artwork:** To clear the currently displayed artwork, the server sends an empty binary message (only the message type byte and timestamp, with no image data).
+**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
@@ -461,7 +477,7 @@ The `visualizer` object in [`stream/update`](#server--client-streamupdate) has t
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `3` (uint8)
+- Byte 0: message type `6` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: visualization data
 
