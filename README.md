@@ -7,14 +7,15 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
+- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls the Resonate group this client is part of
-  - **Metadata** - displays metadata. Has preferred format for cover art
+  - **Metadata** - displays text metadata (title, artist, album, etc.)
+  - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
 - **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For metadata clients requesting artwork, the server creates a session to send album artwork and other visual metadata
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server creates a session to send album artwork and other visual images
 
 ## Establishing a Connection
 
@@ -169,10 +170,11 @@ Players that can output audio should have the role `player`.
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
   - `controller` - controls the current Resonate group
-  - `metadata` - displays metadata
+  - `metadata` - displays text metadata
+  - `artwork` - displays artwork images
   - `visualizer` - visualizes audio
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
-- `metadata_support?`: object - only if `metadata` role is set ([see metadata support object details](#client--server-clienthello-metadata-support-object))
+- `artwork_support?`: object - only if `artwork` role is set ([see artwork support object details](#client--server-clienthello-artwork-support-object))
 - `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
 
 ### Client → Server: `client/time`
@@ -207,7 +209,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 When a new stream starts.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamstart-metadata-object))
+- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
 ### Server → Client: `stream/update`
@@ -215,15 +217,15 @@ When a new stream starts.
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamupdate-metadata-object))
+- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
 
 ### Client → Server: `stream/request-format`
 
-Request different stream format (upgrade or downgrade). Available for clients with the `player` or `metadata` role.
+Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
-- `metadata?`: object - only for clients with the `metadata` role ([see metadata object details](#client--server-streamrequest-format-metadata-object))
+- `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
 
 Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
 
@@ -354,46 +356,7 @@ Group state update.
 
 
 ## Metadata messages
-This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
-
-### Client → Server: `client/hello` metadata support object
-
-The `metadata_support` object in [`client/hello`](#client--server-clienthello) has this structure:
-
-- `metadata_support`: object
-  - `support_picture_formats`: object[] - list of supported artwork formats in priority order (empty array if no art desired, first is preferred)
-    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
-    - `media_width`: integer - max width in pixels
-    - `media_height`: integer - max height in pixels
-
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio.
-
-### Client → Server: `stream/request-format` metadata object
-
-The `metadata` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
-
-- `metadata`: object
-  - `art_format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
-  - `media_width?`: integer - requested max width in pixels
-  - `media_height?`: integer - requested max height in pixels
-
-### Server → Client: `stream/start` metadata object
-
-The `metadata` object in [`stream/start`](#server--client-streamstart) (sent to clients that specified supported picture formats) has this structure:
-
-- `metadata`: object
-  - `art_format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
-  - `art_width`: integer - width in pixels of the encoded image
-  - `art_height`: integer - height in pixels of the encoded image
-
-### Server → Client: `stream/update` metadata object
-
-The `metadata` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `metadata`: object
-  - `art_format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
-  - `art_width?`: integer - width in pixels of the encoded image
-  - `art_height?`: integer - height in pixels of the encoded image
+This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback state. Metadata clients receive session updates with track details.
 
 ### Server → Client: `session/update` metadata object
 
@@ -416,7 +379,49 @@ Clients can calculate the current track position at any time using the last rece
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
-### Server → Client: Media Art (Binary)
+## Artwork messages
+This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
+
+### Client → Server: `client/hello` artwork support object
+
+The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `artwork_support`: object
+  - `support_picture_formats`: object[] - list of supported artwork formats in priority order (must have at least one format, first is preferred)
+    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
+    - `media_width`: integer - max width in pixels
+    - `media_height`: integer - max height in pixels
+
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio.
+
+### Client → Server: `stream/request-format` artwork object
+
+The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+- `artwork`: object
+  - `art_format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
+  - `media_width?`: integer - requested max width in pixels
+  - `media_height?`: integer - requested max height in pixels
+
+### Server → Client: `stream/start` artwork object
+
+The `artwork` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `artwork`: object
+  - `art_format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+  - `art_width`: integer - width in pixels of the encoded image
+  - `art_height`: integer - height in pixels of the encoded image
+
+### Server → Client: `stream/update` artwork object
+
+The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `artwork`: object
+  - `art_format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+  - `art_width?`: integer - width in pixels of the encoded image
+  - `art_height?`: integer - height in pixels of the encoded image
+
+### Server → Client: Artwork (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
