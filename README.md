@@ -387,10 +387,9 @@ This section describes messages specific to clients with the `artwork` role, whi
 The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `artwork_support`: object
-  - `support_picture_formats`: object[] - list of supported artwork formats in priority order (must have at least one format, first is preferred)
-    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
-    - `media_width`: integer - max width in pixels
-    - `media_height`: integer - max height in pixels
+  - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
+  - `media_width`: integer - max width in pixels
+  - `media_height`: integer - max height in pixels
 
 **Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio.
 
