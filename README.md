@@ -392,6 +392,7 @@ Clients can calculate the current track position at any time using the last rece
   - `playback_speed?`: integer | null - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed)
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
+  - `group_name?`: string | null - group name
 
 ### Server → Client: Media Art (Binary)
 
