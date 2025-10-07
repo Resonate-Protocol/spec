@@ -256,7 +256,7 @@ This message must always be sent after establishing the connection and state upd
 
 Must be sent immediately after receiving `server/hello` and whenever any state changes.
 
-- `state`: 'playing' | 'idle' - playing if active stream, idle if no active stream
+- `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
 - `volume`: integer - range 0-100
 - `muted`: boolean - mute state
 
