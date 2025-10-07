@@ -362,7 +362,6 @@ The `metadata` object in [`session/update`](#server--client-sessionupdate) has t
   - `album_artist?`: string | null
   - `album?`: string | null
   - `artwork_url?`: string | null
-  - `lyric_url?`: string | null
   - `year?`: number | null
   - `track?`: number | null
   - `track_progress?`: number | null - in seconds
