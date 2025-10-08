@@ -402,7 +402,8 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
 
 - `artwork`: object
-  - `channels?`: object[] - configuration for artwork channels, array index is the channel number
+  - `channels?`: object[] - configuration for artwork channels
+    - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object), a channel number must not be repeated in the array
     - `source?`: 'album' | 'artist' - artwork source type
     - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
     - `media_width?`: integer - requested max width in pixels
