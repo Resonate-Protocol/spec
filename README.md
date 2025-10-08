@@ -242,7 +242,6 @@ No payload.
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
 
-- `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
 
 ### Server → Client: `group/update`
@@ -251,6 +250,7 @@ State update of the group this client is part of.
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified.
 
+- `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 - `controller?`: object - only sent to clients with `controller` role ([see controller object details](#server--client-groupupdate-controller-object))
