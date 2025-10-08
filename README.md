@@ -7,14 +7,15 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, visualizer). Every client has a unique identifier
+- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls the Resonate group this client is part of
-  - **Metadata** - displays metadata. Has preferred format for cover art
+  - **Metadata** - displays text metadata (title, artist, album, etc.)
+  - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and active session (may be null)
 - **Resonate Session** - details the currently playing media and its playback state. Has associated metadata and a unique identifier. Each session is associated with exactly one group
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. The server sends audio chunks as far ahead as the client's buffer capacity allows
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server creates a session to send album artwork and other visual images
 
 ## Establishing a Connection
 
@@ -169,10 +170,11 @@ Players that can output audio should have the role `player`.
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
   - `controller` - controls the current Resonate group
-  - `metadata` - displays metadata
+  - `metadata` - displays text metadata describing the currently playing audio
+  - `artwork` - displays artwork images
   - `visualizer` - visualizes audio
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
-- `metadata_support?`: object - only if `metadata` role is set ([see metadata support object details](#client--server-clienthello-metadata-support-object))
+- `artwork_support?`: object - only if `artwork` role is set ([see artwork support object details](#client--server-clienthello-artwork-support-object))
 - `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
 
 ### Client → Server: `client/time`
@@ -207,7 +209,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 When a new stream starts.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamstart-metadata-object))
+- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
 ### Server → Client: `stream/update`
@@ -215,8 +217,19 @@ When a new stream starts.
 When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `metadata?`: object - only sent to clients with the `metadata` role that specified supported picture formats ([see metadata object details](#server--client-streamupdate-metadata-object))
+- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
+
+### Client → Server: `stream/request-format`
+
+Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
+
+- `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
+- `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+
+Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
+
+**Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
@@ -270,14 +283,15 @@ Must be sent immediately after receiving `server/hello` and whenever any state c
 - `volume`: integer - range 0-100
 - `muted`: boolean - mute state
 
-### Client → Server: `stream/request-format`
+### Client → Server: `stream/request-format` player object
 
-Request different stream format (upgrade or downgrade). Only for clients with the `player` role.
+The `player` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
 
-- `codec?`: 'opus' | 'flac' | 'pcm' - requested codec identifier
-- `channels?`: integer - requested number of channels (e.g., 1 = mono, 2 = stereo)
-- `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
-- `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
+- `player`: object
+  - `codec?`: 'opus' | 'flac' | 'pcm' - requested codec identifier
+  - `channels?`: integer - requested number of channels (e.g., 1 = mono, 2 = stereo)
+  - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
+  - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
 Response: `stream/update` with the new format.
 
@@ -358,30 +372,7 @@ The `controller` object in [`group/update`](#server--client-groupupdate) has thi
 
 
 ## Metadata messages
-This section describes messages specific to clients with the `metadata` role, which handle display of track information, artwork, and playback state. Metadata clients receive session updates with track details and can optionally receive artwork in their preferred format and resolution.
-
-### Client → Server: `client/hello` metadata support object
-
-The `metadata_support` object in [`client/hello`](#client--server-clienthello) has this structure:
-
-- `metadata_support`: object
-  - `support_picture_formats`: string[] - supported media art image formats (empty array if no art desired)
-  - `media_width?`: integer - max width in pixels (if only width set, scales preserving aspect ratio)
-  - `media_height?`: integer - max height in pixels (if only height set, scales preserving aspect ratio)
-
-### Server → Client: `stream/start` metadata object
-
-The `metadata` object in [`stream/start`](#server--client-streamstart) (sent to clients that specified supported picture formats) has this structure:
-
-- `metadata`: object
-  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
-
-### Server → Client: `stream/update` metadata object
-
-The `metadata` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `metadata`: object
-  - `art_format`: 'bmp' | 'jpeg' | 'png' - format of the encoded image
+This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive session updates with track details.
 
 ### Server → Client: `session/update` metadata object
 
@@ -404,15 +395,80 @@ Clients can calculate the current track position at any time using the last rece
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
-### Server → Client: Media Art (Binary)
+## Artwork messages
+This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
+
+**Channels:** Artwork clients can support 1-4 independent channels, allowing them to display multiple related images. For example, a device could display album artwork on one channel while simultaneously showing artist photos or background images on other channels. Each channel operates independently with its own format, resolution, and source type (album or artist artwork).
+
+### Client → Server: `client/hello` artwork support object
+
+The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `artwork_support`: object
+  - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
+    - `source`: 'album' | 'artist' | 'none' - artwork source type
+    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
+    - `media_width`: integer - max width in pixels
+    - `media_height`: integer - max height in pixels
+
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 2), `channels[1]` is channel 1 (binary message type 3), etc.
+
+**None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (for dynamic display layouts).
+
+### Client → Server: `stream/request-format` artwork object
+
+The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
+
+After receiving this message, the server responds with a [`stream/update`](#server--client-streamupdate-artwork-object) message containing the new format for the requested channel, followed by immediate artwork updates through binary messages.
+
+- `artwork`: object
+  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
+  - `source?`: 'album' | 'artist' | 'none' - artwork source type
+  - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
+  - `media_width?`: integer - requested max width in pixels
+  - `media_height?`: integer - requested max height in pixels
+
+### Server → Client: `stream/start` artwork object
+
+The `artwork` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `artwork`: object
+  - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
+    - `source`: 'album' | 'artist' | 'none' - artwork source type
+    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `width`: integer - width in pixels of the encoded image
+    - `height`: integer - height in pixels of the encoded image
+
+### Server → Client: `stream/update` artwork object
+
+The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
+
+- `artwork`: object
+  - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
+    - `source?`: 'album' | 'artist' - artwork source type
+    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `width?`: integer - width in pixels of the encoded image
+    - `height?`: integer - height in pixels of the encoded image
+
+### Server → Client: Artwork (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `2` (uint8)
+- Byte 0: message type `2`-`5` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded image
 
+The message type determines which artwork channel this image is for:
+- Type `2`: Channel 0
+- Type `3`: Channel 1
+- Type `4`: Channel 2
+- Type `5`: Channel 3
+
 The timestamp indicates when this artwork becomes valid for display.
+
+**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
@@ -443,7 +499,7 @@ The `visualizer` object in [`stream/update`](#server--client-streamupdate) has t
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `3` (uint8)
+- Byte 0: message type `6` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: visualization data
 
