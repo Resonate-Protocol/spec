@@ -170,7 +170,7 @@ Players that can output audio should have the role `player`.
 - `supported_roles`: string[] - at least one of:
   - `player` - outputs audio
   - `controller` - controls the current Resonate group
-  - `metadata` - displays text metadata
+  - `metadata` - displays text metadata describing the currently playing audio
   - `artwork` - displays artwork images
   - `visualizer` - visualizes audio
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
@@ -356,7 +356,7 @@ Group state update.
 
 
 ## Metadata messages
-This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback state. Metadata clients receive session updates with track details.
+This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive session updates with track details.
 
 ### Server → Client: `session/update` metadata object
 
