@@ -395,12 +395,14 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 
 - `artwork_support`: object
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
-    - `source`: 'album' | 'artist' - artwork source type
+    - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
     - `media_width`: integer - max width in pixels
     - `media_height`: integer - max height in pixels
 
 **Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 2), `channels[1]` is channel 1 (binary message type 3), etc.
+
+**None source:** If a channel has `source` set to `none`, the client does not wish to receive artwork on that channel. The server will not send any artwork data for that channel. This allows to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (for dynamic display layouts).
 
 ### Client → Server: `stream/request-format` artwork object
 
@@ -408,9 +410,11 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
+After receiving this message, the server responds with a [`stream/update`](#server--client-streamupdate-artwork-object) message containing the new format for the requested channel(s), followed by immediate artwork updates through binary messages.
+
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
-  - `source?`: 'album' | 'artist' - artwork source type
+  - `source?`: 'album' | 'artist' | 'none' - artwork source type
   - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
   - `media_width?`: integer - requested max width in pixels
   - `media_height?`: integer - requested max height in pixels
@@ -421,7 +425,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 - `artwork`: object
   - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
-    - `source`: 'album' | 'artist' - artwork source type
+    - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
