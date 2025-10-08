@@ -236,7 +236,7 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
 
 State update of the group this client is part of.
 
-Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
+Delta updates that must be merged into existing state. Fields set to `null` should be nullified.
 
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
