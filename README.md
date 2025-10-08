@@ -71,6 +71,21 @@ Message format:
 
 WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
 
+### Binary Message ID Structure
+
+Binary message IDs organize bits into fields: **bits 7-2** identify the role type, **bits 1-0** identify the message slot within that role. This allocates 4 message slots per role.
+
+**Role assignments:**
+- `000000xx` (0-3): Player role
+- `000001xx` (4-7): Artwork role
+- `000010xx` (8-11): Visualizer role
+
+**Message slots within each role:**
+- Slot 0: `xxxxxx00`
+- Slot 1: `xxxxxx01`
+- Slot 2: `xxxxxx10`
+- Slot 3: `xxxxxx11`
+
 ## Clock Synchronization
 
 Clients continuously send `client/time` messages to maintain an accurate offset from the server's clock. The frequency of these messages is determined by the client based on network conditions and clock stability.
@@ -121,9 +136,9 @@ sequenceDiagram
     Server->>Client: group/update (commands, group_volume, members)
 
     loop During playback
-        Server->>Client: binary Type 1 (audio chunks with timestamps)
-        Server-->>Client: binary Type 2 (media art)
-        Server-->>Client: binary Type 3 (visualization data)
+        Server->>Client: binary Type 0 (audio chunks with timestamps)
+        Server-->>Client: binary Type 4-7 (artwork channels 0-3)
+        Server-->>Client: binary Type 8 (visualization data)
     end
 
     alt Player requests format change
@@ -331,7 +346,7 @@ The `player` object in [`stream/update`](#server--client-streamupdate) has this 
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `1` (uint8)
+- Byte 0: message type `0` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded audio frame
 
@@ -411,7 +426,7 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
     - `media_width`: integer - max width in pixels
     - `media_height`: integer - max height in pixels
 
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 2), `channels[1]` is channel 1 (binary message type 3), etc.
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (for dynamic display layouts).
 
@@ -456,15 +471,15 @@ The `artwork` object in [`stream/update`](#server--client-streamupdate) has this
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `2`-`5` (uint8) - corresponds to artwork channel 0-3 respectively
+- Byte 0: message type `4`-`7` (uint8) - Artwork role, message slots 0-3 correspond to artwork channels 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: encoded image
 
 The message type determines which artwork channel this image is for:
-- Type `2`: Channel 0
-- Type `3`: Channel 1
-- Type `4`: Channel 2
-- Type `5`: Channel 3
+- Type `4`: Channel 0 (Artwork role, slot 0)
+- Type `5`: Channel 1 (Artwork role, slot 1)
+- Type `6`: Channel 2 (Artwork role, slot 2)
+- Type `7`: Channel 3 (Artwork role, slot 3)
 
 The timestamp indicates when this artwork becomes valid for display.
 
@@ -499,7 +514,7 @@ The `visualizer` object in [`stream/update`](#server--client-streamupdate) has t
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `6` (uint8)
+- Byte 0: message type `8` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
 - Rest of bytes: visualization data
 
