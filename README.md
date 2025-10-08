@@ -250,7 +250,7 @@ State update of the group this client is part of.
 
 Delta updates that must be merged into existing state. Fields set to `null` should be nullified.
 
-- `playback_state?`: 'playing' | 'paused' | 'stopped' - only sent to clients with `controller` or `metadata` roles
+- `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 - `controller?`: object - only sent to clients with `controller` role ([see controller object details](#server--client-groupupdate-controller-object))
