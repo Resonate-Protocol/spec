@@ -406,13 +406,14 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 
 The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
 
+Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
+
 - `artwork`: object
-  - `channels?`: object[] - configuration for artwork channels
-    - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object), a channel number must not be repeated in the array
-    - `source?`: 'album' | 'artist' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
-    - `media_width?`: integer - requested max width in pixels
-    - `media_height?`: integer - requested max height in pixels
+  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
+  - `source?`: 'album' | 'artist' - artwork source type
+  - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
+  - `media_width?`: integer - requested max width in pixels
+  - `media_height?`: integer - requested max height in pixels
 
 ### Server → Client: `stream/start` artwork object
 
