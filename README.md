@@ -112,7 +112,7 @@ sequenceDiagram
     Server->>Client: server/hello (server info)
 
     alt Player role
-        Client->>Server: player/update (initial state, volume, muted)
+        Client->>Server: client/state (player: volume, muted, state)
     end
 
     loop Continuous clock sync
@@ -120,24 +120,23 @@ sequenceDiagram
         Server->>Client: server/time (timing + offset info)
     end
 
-    Client->>Server: group/get-list
-    Server->>Client: group/list (available groups + state)
-
-    Client->>Server: group/join (join a group)
-    alt Client has active stream
-        Server->>Client: stream/end
-    end
-    alt New group has active stream
+    alt Stream starts
         Server->>Client: stream/start (codec, format details)
     end
 
-    Server->>Client: session/update (group_id, playback_state, metadata)
-    Server->>Client: group/update (commands, group_volume, members)
+    Server->>Client: group/update (playback_state, group_id, group_name)
+    Server->>Client: server/state (metadata, controller)
 
     loop During playback
-        Server->>Client: binary Type 0 (audio chunks with timestamps)
-        Server-->>Client: binary Type 4-7 (artwork channels 0-3)
-        Server-->>Client: binary Type 8 (visualization data)
+        alt Player role
+            Server->>Client: binary Type 0 (audio chunks with timestamps)
+        end
+        alt Artwork role
+            Server->>Client: binary Types 4-7 (artwork channels 0-3)
+        end
+        alt Visualizer role
+            Server->>Client: binary Type 8 (visualization data)
+        end
     end
 
     alt Player requests format change
@@ -146,21 +145,20 @@ sequenceDiagram
     end
 
     alt Controller role
-        Client->>Server: group/command (play/pause/volume/etc)
+        Client->>Server: client/command (controller: play/pause/volume/switch/etc)
     end
 
     alt Player role state changes
-        Client->>Server: player/update (state changes)
+        Client->>Server: client/state (player state changes)
     end
 
-    Client->>Server: group/unjoin (leave group)
-    alt Client has active stream
-        Server->>Client: stream/end
+    alt Server commands player
+        Server->>Client: server/command (player: volume, mute)
     end
 
     Server->>Client: stream/end (stop playback)
     alt Player role
-        Client->>Server: player/update (idle state)
+        Client->>Server: client/state (player idle state)
     end
 ```
 
