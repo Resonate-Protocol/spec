@@ -151,7 +151,9 @@ sequenceDiagram
 ```
 
 ## Core messages
-This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, and stream lifecycle management. Every Resonate client and server must implement all messages in this section regardless of their specific roles. Role-specific payload details are documented in their respective role sections.
+This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
+
+Every Resonate client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
 ### Client → Server: `client/hello`
 
@@ -188,7 +190,7 @@ Once received by the server, the server responds with a [`server/time`](#server-
 
 Response to the [`client/hello`](#client--server-clienthello) message with information about the server.
 
-Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`player/update`](#client--server-playerupdate) message if the client has the `player` role).
+Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
@@ -203,6 +205,37 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 - `client_transmitted`: integer - client's internal clock timestamp received in the `client/time` message
 - `server_received`: integer - timestamp that the server received the `client/time` message in microseconds
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
+
+### Client → Server: `client/state`
+
+Client sends state updates to the server. Contains role-specific state objects based on the client's supported roles.
+
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) (for roles that require initial state) and whenever any state changes.
+
+Only include fields that have changed. The server will merge these updates into existing state.
+
+- `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
+
+### Client → Server: `client/command`
+
+Client sends commands to the server. Contains command objects based on the client's supported roles.
+
+- `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
+
+### Server → Client: `server/state`
+
+Server sends state updates to the client. Contains role-specific state objects.
+
+Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be nullified.
+
+- `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
+- `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
+
+### Server → Client: `server/command`
+
+Server sends commands to the client. Contains role-specific command objects.
+
+- `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
 
 ### Server → Client: `stream/start`
 
@@ -238,12 +271,6 @@ Visualizer should stop visualizing and clear buffers.
 
 No payload.
 
-### Server → Client: `session/update`
-
-Delta updates that must be merged into existing state. Fields set to `null` should be nullified. The server should null the metadata whenever a session is ended.
-
-- `metadata?`: object - only sent to clients with `metadata` role ([see metadata object details](#server--client-sessionupdate-metadata-object))
-
 ### Server → Client: `group/update`
 
 State update of the group this client is part of.
@@ -253,7 +280,6 @@ Delta updates that must be merged into existing state. Fields set to `null` shou
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
-- `controller?`: object - only sent to clients with `controller` role ([see controller object details](#server--client-groupupdate-controller-object))
 
 
 ## Player messages
@@ -272,16 +298,18 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer, that are yet to be played
   - `supported_commands`: string[] - subset of: `volume`, `mute`
 
-### Client → Server: `player/update`
+### Client → Server: `client/state` player object
+
+The `player` object in [`client/state`](#client--server-clientstate) has this structure:
 
 Informs the server of player state changes. Only for clients with the `player` role.
-This message must always be sent after establishing the connection and state updates, including when the volume was changed through a `player/command` received from the server or when a volume button was pressed locally.
 
-Must be sent immediately after receiving `server/hello` and whenever any state changes.
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) and whenever any state changes, including when the volume was changed through a `server/command` received from the server or when a volume button was pressed locally.
 
-- `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
-- `volume`: integer - range 0-100
-- `muted`: boolean - mute state
+- `player`: object
+  - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
+  - `volume`: integer - range 0-100
+  - `muted`: boolean - mute state
 
 ### Client → Server: `stream/request-format` player object
 
@@ -297,13 +325,16 @@ Response: `stream/update` with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
-### Server → Client: `player/command`
+### Server → Client: `server/command` player object
+
+The `player` object in [`server/command`](#server--client-servercommand) has this structure:
 
 Request the player to perform an action, e.g., change volume or mute state.
 
-- `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
-- `volume?`: integer - volume range 0-100, only set if `command` is `volume`
-- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+- `player`: object
+  - `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
+  - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
+  - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
 ### Server → Client: `stream/start` player object
 
@@ -338,45 +369,39 @@ Binary messages should be rejected if there is no active stream.
 The timestamp indicates when exactly the first sample in the chunk should leave the device.
 
 ## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and basic switching between groups.
+This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
 
 Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
 
-### Client → Server: `group/command`
+### Client → Server: `client/command` controller object
 
-Control the group that's playing. Only valid from clients with the `controller` role.
+The `controller` object in [`client/command`](#client--server-clientcommand) has this structure:
 
-- `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` - must be one of the values listed in `group/update` field `supported_commands`
-- `volume?`: integer - volume range 0-100, only set if `command` is `volume`
-- `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-
-### Client → Server: `group/switch`
-
-Request the server to switch this client to a different group.
-
-For a client with the `player` role this will:
-- Cycle the group this client is part of through all combinations of: all other playing groups, all other playing players, and just itself
-For a client without the `player` role this will:
-- Cycle the group this client is part of through all combinations of: all other playing groups, and all other playing players
-
-No payload.
-
-### Server → Client: `group/update` controller object
-
-The `controller` object in [`group/update`](#server--client-groupupdate) has this structure:
+Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle`
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` | 'switch' - must be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object
+  - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
+  - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+
+**Note:** When `command` is 'switch', the server switches this client to a different group. For a client with the `player` role: cycles through all other playing groups, all other playing players, and just itself. For a client without the `player` role: cycles through all other playing groups and all other playing players.
+
+### Server → Client: `server/state` controller object
+
+The `controller` object in [`server/state`](#server--client-serverstate) has this structure:
+
+- `controller`: object
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` | 'switch'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
 
 
 ## Metadata messages
-This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive session updates with track details.
+This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
 
-### Server → Client: `session/update` metadata object
+### Server → Client: `server/state` metadata object
 
-The `metadata` object in [`session/update`](#server--client-sessionupdate) has this structure:
+The `metadata` object in [`server/state`](#server--client-serverstate) has this structure:
 
 Clients can calculate the current track position at any time using the last received values: `current_track_progress_ms = max(min(metadata.track_progress + (current_time - metadata.timestamp) * metadata.playback_speed / 1000000, metadata.track_duration), 0)`
 
