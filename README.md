@@ -476,7 +476,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 - `artwork`: object
   - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
 
@@ -487,7 +487,7 @@ The `artwork` object in [`stream/update`](#server--client-streamupdate) has this
 - `artwork`: object
   - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
     - `source?`: 'album' | 'artist' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width?`: integer - width in pixels of the encoded image
     - `height?`: integer - height in pixels of the encoded image
 
