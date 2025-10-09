@@ -366,10 +366,10 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
 The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `player`: object
-  - `codec`: string - codec to be used
-  - `sample_rate`: integer - sample rate to be used
-  - `channels`: integer - channels to be used
-  - `bit_depth`: integer - bit depth to be used
+  - `codec?`: string - codec to be used
+  - `sample_rate?`: integer - sample rate to be used
+  - `channels?`: integer - channels to be used
+  - `bit_depth?`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: Audio Chunks (Binary)
