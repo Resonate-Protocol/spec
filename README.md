@@ -195,7 +195,7 @@ Players that can output audio should have the role `player`.
 ### Client → Server: `client/time`
 
 Sends current internal clock timestamp (in microseconds) to the server.
-Once received by the server, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
+Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
 
 - `client_transmitted`: integer - client's internal clock timestamp in microseconds
 
@@ -320,7 +320,7 @@ The `player` object in [`client/state`](#client--server-clientstate) has this st
 
 Informs the server of player state changes. Only for clients with the `player` role.
 
-State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` received from the server or when the volume was adjusted locally.
+State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or when the volume was adjusted locally.
 
 - `player`: object
   - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
