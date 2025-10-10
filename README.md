@@ -98,6 +98,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 - When a client cannot maintain sync (e.g., buffer underrun), it should mute its audio output and continue buffering until it can resume synchronized playback
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
 
 ```mermaid
 sequenceDiagram
