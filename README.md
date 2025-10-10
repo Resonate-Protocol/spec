@@ -260,7 +260,7 @@ When a new stream starts.
 
 ### Server → Client: `stream/update`
 
-Sent when the format of the binary stream changes. Contains delta updates with only the changed fields.
+Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
@@ -291,7 +291,7 @@ No payload.
 
 State update of the group this client is part of.
 
-Contains delta updates with only the changed fields. Fields set to `null` should be cleared from the client's state.
+Contains delta updates with only the changed fields. The client should merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
