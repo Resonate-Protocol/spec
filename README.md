@@ -239,7 +239,7 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Only include fields that have changed. The client will merge these updates into existing state. Fields explicitly set to `null` should be treated as cleared (set to null in the client's state).
+Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
@@ -291,7 +291,7 @@ No payload.
 
 State update of the group this client is part of.
 
-Contains delta updates with only the changed fields. Fields explicitly set to `null` should be treated as cleared (set to null in the client's state).
+Contains delta updates with only the changed fields. Fields set to `null` should be cleared from the client's state.
 
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
