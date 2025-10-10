@@ -59,6 +59,8 @@ WebSocket text messages are used to send JSON payloads.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
+All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
+
 Message format example:
 
 ```json
