@@ -209,7 +209,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains role-specific state objects based on the client's supported roles.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) (for roles that require initial state) and whenever any state changes.
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) and whenever any state changes, including when the volume was changed through a `server/command` received from the server or when the volume was adjusted locally.
 
 Only include fields that have changed. The server will merge these updates into existing state.
 
