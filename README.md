@@ -59,12 +59,29 @@ WebSocket text messages are used to send JSON payloads.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
-Message format:
+Message format example:
 
 ```json
 {
   "type": "stream/start",
-  "payload": { ... }
+  "payload": {
+    "player": {
+      "codec": "opus",
+      "sample_rate": 48000,
+      "channels": 2,
+      "bit_depth": 16
+    },
+    "artwork": {
+      "channels": [
+        {
+          "source": "album",
+          "format": "jpeg",
+          "width": 800,
+          "height": 800
+        }
+      ]
+    }
+  }
 }
 ```
 
