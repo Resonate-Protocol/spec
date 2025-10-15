@@ -59,12 +59,31 @@ WebSocket text messages are used to send JSON payloads.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
-Message format:
+All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
+
+Message format example:
 
 ```json
 {
   "type": "stream/start",
-  "payload": { ... }
+  "payload": {
+    "player": {
+      "codec": "opus",
+      "sample_rate": 48000,
+      "channels": 2,
+      "bit_depth": 16
+    },
+    "artwork": {
+      "channels": [
+        {
+          "source": "album",
+          "format": "jpeg",
+          "width": 800,
+          "height": 800
+        }
+      ]
+    }
+  }
 }
 ```
 
@@ -96,8 +115,9 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 - Each client is responsible for maintaining synchronization with the server's timestamps
 - Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
 - When a client cannot maintain sync (e.g., buffer underrun), it should mute its audio output and continue buffering until it can resume synchronized playback
-- The server is unaware of individual client sync synchronized accuracy - it simply broadcasts timestamped audio
-- Late-joining clients receive audio with future timestamps only, allowing them to start playback in sync with existing clients
+- The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
+- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
 
 ```mermaid
 sequenceDiagram
@@ -112,7 +132,7 @@ sequenceDiagram
     Server->>Client: server/hello (server info)
 
     alt Player role
-        Client->>Server: player/update (initial state, volume, muted)
+        Client->>Server: client/state (player: volume, muted, state)
     end
 
     loop Continuous clock sync
@@ -120,24 +140,23 @@ sequenceDiagram
         Server->>Client: server/time (timing + offset info)
     end
 
-    Client->>Server: group/get-list
-    Server->>Client: group/list (available groups + state)
-
-    Client->>Server: group/join (join a group)
-    alt Client has active stream
-        Server->>Client: stream/end
-    end
-    alt New group has active stream
+    alt Stream starts
         Server->>Client: stream/start (codec, format details)
     end
 
-    Server->>Client: session/update (group_id, playback_state, metadata)
-    Server->>Client: group/update (commands, group_volume, members)
+    Server->>Client: group/update (playback_state, group_id, group_name)
+    Server->>Client: server/state (metadata, controller)
 
     loop During playback
-        Server->>Client: binary Type 0 (audio chunks with timestamps)
-        Server-->>Client: binary Type 4-7 (artwork channels 0-3)
-        Server-->>Client: binary Type 8 (visualization data)
+        alt Player role
+            Server->>Client: binary Type 0 (audio chunks with timestamps)
+        end
+        alt Artwork role
+            Server->>Client: binary Types 4-7 (artwork channels 0-3)
+        end
+        alt Visualizer role
+            Server->>Client: binary Type 8 (visualization data)
+        end
     end
 
     alt Player requests format change
@@ -146,21 +165,20 @@ sequenceDiagram
     end
 
     alt Controller role
-        Client->>Server: group/command (play/pause/volume/etc)
+        Client->>Server: client/command (controller: play/pause/volume/switch/etc)
     end
 
     alt Player role state changes
-        Client->>Server: player/update (state changes)
+        Client->>Server: client/state (player state changes)
     end
 
-    Client->>Server: group/unjoin (leave group)
-    alt Client has active stream
-        Server->>Client: stream/end
+    alt Server commands player
+        Server->>Client: server/command (player: volume, mute)
     end
 
     Server->>Client: stream/end (stop playback)
     alt Player role
-        Client->>Server: player/update (idle state)
+        Client->>Server: client/state (player idle state)
     end
 ```
 
@@ -195,8 +213,8 @@ Players that can output audio should have the role `player`.
 
 ### Client → Server: `client/time`
 
-Sends current internal clock timestamp (in microseconds) to server.
-Once received by the server, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
+Sends current internal clock timestamp (in microseconds) to the server.
+Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
 
 - `client_transmitted`: integer - client's internal clock timestamp in microseconds
 
@@ -224,9 +242,9 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains role-specific state objects based on the client's supported roles.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) and whenever any state changes, including when the volume was changed through a `server/command` received from the server or when the volume was adjusted locally.
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) for roles that report state (such as `player`), and whenever any state changes thereafter.
 
-Only include fields that have changed. The server will merge these updates into existing state.
+For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
@@ -240,7 +258,7 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be nullified.
+Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
@@ -261,7 +279,7 @@ When a new stream starts.
 
 ### Server → Client: `stream/update`
 
-When the format of the messages changes for the ongoing stream. Deltas updating only the relevant fields.
+Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
@@ -280,8 +298,11 @@ Response: [`stream/update`](#server--client-streamupdate) with the new format fo
 
 ### Server → Client: `stream/end`
 
-Player should stop streaming and clear buffers - report idle state.
-Visualizer should stop visualizing and clear buffers.
+Indicates the stream has ended.
+
+Clients with the `player` role should stop playback and clear buffers.
+
+Clients with the `visualizer` role should stop visualizing and clear buffers.
 
 No payload.
 
@@ -289,7 +310,7 @@ No payload.
 
 State update of the group this client is part of.
 
-Delta updates that must be merged into existing state. Fields set to `null` should be nullified.
+Contains delta updates with only the changed fields. The client should merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
@@ -309,8 +330,8 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
-  - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer, that are yet to be played
-  - `supported_commands`: string[] - subset of: `volume`, `mute`
+  - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
+  - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 ### Client → Server: `client/state` player object
 
@@ -318,7 +339,7 @@ The `player` object in [`client/state`](#client--server-clientstate) has this st
 
 Informs the server of player state changes. Only for clients with the `player` role.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) and whenever any state changes, including when the volume was changed through a `server/command` received from the server or when a volume button was pressed locally.
+State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
   - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
@@ -335,7 +356,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: `stream/update` with the new format.
+Response: [`stream/update`](#server--client-streamupdate) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -366,10 +387,10 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
 The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `player`: object
-  - `codec`: string - codec to be used
-  - `sample_rate`: integer - sample rate to be used
-  - `channels`: integer - channels to be used
-  - `bit_depth`: integer - bit depth to be used
+  - `codec?`: string - codec to be used
+  - `sample_rate?`: integer - sample rate to be used
+  - `channels?`: integer - channels to be used
+  - `bit_depth?`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: Audio Chunks (Binary)
@@ -377,10 +398,10 @@ The `player` object in [`stream/update`](#server--client-streamupdate) has this 
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `0` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output by the device
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when exactly the first sample in the chunk should leave the device.
+The timestamp indicates when the first audio sample in this chunk should be sent to the device or speaker's audio output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
@@ -394,18 +415,27 @@ The `controller` object in [`client/command`](#client--server-clientcommand) has
 Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` | 'switch' - must be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - must be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
-**Note:** When `command` is 'switch', the server switches this client to a different group. For a client with the `player` role: cycles through all other playing groups, all other playing players, and just itself. For a client without the `player` role: cycles through all other playing groups and all other playing players.
+**Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
+
+For clients **with** the `player` role, the cycle includes:
+1. Multi-client groups that are currently playing
+2. Single-client groups (other players playing alone)
+3. A solo group containing only this client
+
+For clients **without** the `player` role, the cycle includes:
+1. Multi-client groups that are currently playing
+2. Single-client groups (other players playing alone)
 
 ### Server → Client: `server/state` controller object
 
 The `controller` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `controller`: object
-  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | `repeat_off` | `repeat_one` | `repeat_all` | `shuffle` | `unshuffle` | 'switch'
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
 
@@ -452,7 +482,7 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 
 **Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
 
-**None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (for dynamic display layouts).
+**None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
 ### Client → Server: `stream/request-format` artwork object
 
@@ -476,7 +506,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 - `artwork`: object
   - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
 
@@ -486,8 +516,8 @@ The `artwork` object in [`stream/update`](#server--client-streamupdate) has this
 
 - `artwork`: object
   - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
-    - `source?`: 'album' | 'artist' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image (must match one from client's `support_picture_formats`)
+    - `source?`: 'album' | 'artist' | 'none' - artwork source type
+    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width?`: integer - width in pixels of the encoded image
     - `height?`: integer - height in pixels of the encoded image
 
@@ -495,8 +525,8 @@ The `artwork` object in [`stream/update`](#server--client-streamupdate) has this
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `4`-`7` (uint8) - Artwork role, message slots 0-3 correspond to artwork channels 0-3 respectively
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
+- Byte 0: message type `4`-`7` (uint8) - corresponds to artwork channel 0-3 respectively
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
 - Rest of bytes: encoded image
 
 The message type determines which artwork channel this image is for:
@@ -505,7 +535,7 @@ The message type determines which artwork channel this image is for:
 - Type `6`: Channel 2 (Artwork role, slot 2)
 - Type `7`: Channel 3 (Artwork role, slot 3)
 
-The timestamp indicates when this artwork becomes valid for display.
+The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
@@ -518,7 +548,7 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 
 - `visualizer_support`: object
   - Desired FFT details (to be determined)
-  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer, that are yet to be displayed
+  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer that are yet to be displayed
 
 ### Server → Client: `stream/start` visualizer object
 
@@ -539,7 +569,7 @@ The `visualizer` object in [`stream/update`](#server--client-streamupdate) has t
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `8` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be presented/played
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device
 - Rest of bytes: visualization data
 
-The timestamp indicates when this visualization data corresponds to the audio.
+The timestamp indicates when this visualization data should be displayed, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
