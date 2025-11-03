@@ -1,4 +1,3 @@
-
 # The Resonate Protocol
 
 _This is raw, unfiltered and experimental._
