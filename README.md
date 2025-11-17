@@ -419,7 +419,23 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
-**Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
+#### Command behaviour
+
+- 'play' - resume playback from current position
+- 'pause' - pause playback at current position
+- 'stop' - stop playback and reset position to beginning
+- 'next' - skip to next track in queue
+- 'previous' - skip to previous track in queue
+- 'volume' - set group volume (requires `volume` parameter)
+- 'mute' - set group mute state (requires `mute` parameter)
+- 'repeat_off' - disable repeat mode
+- 'repeat_one' - repeat the current track continuously
+- 'repeat_all' - repeat the entire queue continuously
+- 'shuffle' - randomize playback order of tracks in the queue
+- 'unshuffle' - restore original playback order of tracks in the queue
+- 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+
+#### Switch command cycle
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -454,14 +470,14 @@ Clients can calculate the current track position at any time using the last rece
   - `title?`: string | null - track title
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
-  - `album?`: string | null - album name
+  - `album?`: string | null - name of the album or release that this track belongs to
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer | null - release year
-  - `track?`: integer | null - track number
+  - `year?`: integer | null - release year in YYYY format
+  - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
   - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
   - `track_duration?`: integer | null - total track length in milliseconds
   - `playback_speed?`: integer | null - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed)
-  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
+  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat entire queue
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 ## Artwork messages
