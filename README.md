@@ -439,6 +439,8 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
 
+**Note:** Group volume is calculated as the average of all player volumes in the group. When setting group volume via the 'volume' command, the server calculates the difference from the current group volume and applies that delta to each player's volume, preserving relative volume levels between players.
+
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
