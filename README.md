@@ -343,8 +343,8 @@ State updates must be sent whenever any state changes, including when the volume
 
 - `player`: object
   - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
-  - `volume`: integer - range 0-100
-  - `muted`: boolean - mute state
+  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
+  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
 
 ### Client → Server: `stream/request-format` player object
 
