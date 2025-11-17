@@ -194,7 +194,7 @@ This message will be followed by a [`server/hello`](#server--client-serverhello)
 
 Players that can output audio should have the role `player`.
 
-- `client_id`: string - uniquely identifies the client for groups and de-duplication
+- `client_id`: string - uniquely identifies the client for groups and de-duplication. Should remain persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
 - `name`: string - friendly name of the client
 - `device_info?`: object - optional information about the device
   - `product_name?`: string - device model/product name
