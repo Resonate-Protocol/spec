@@ -398,10 +398,10 @@ The `player` object in [`stream/update`](#server--client-streamupdate) has this 
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `0` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output by the device
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk should be sent to the device or speaker's audio output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
