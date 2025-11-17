@@ -419,6 +419,8 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
+**Setting group volume:** When setting group volume via the 'volume' command, the server calculates the difference from the current group volume and applies that delta to each player's volume, preserving relative volume levels between players.
+
 **Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
 
 For clients **with** the `player` role, the cycle includes:
@@ -439,7 +441,7 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
 
-**Note:** Group volume is calculated as the average of all player volumes in the group. When setting group volume via the 'volume' command, the server calculates the difference from the current group volume and applies that delta to each player's volume, preserving relative volume levels between players.
+**Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
 
 ## Metadata messages
