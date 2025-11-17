@@ -110,6 +110,8 @@ Clients continuously send `client/time` messages to maintain an accurate offset 
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients use their computed offset to translate server timestamps to their local clock for synchronized playback.
 
+**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Resonate-Protocol/time-filter) repository for a C++ implementation and [aioresonate](https://github.com/Resonate-Protocol/aioresonate/blob/main/aioresonate/client/time_sync.py) for a Python implementation.
+
 ## Playback Synchronization
 
 - Each client is responsible for maintaining synchronization with the server's timestamps
