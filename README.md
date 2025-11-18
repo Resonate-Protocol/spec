@@ -7,7 +7,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
+- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (see [Roles and Variants](#roles-and-variants)). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls the Resonate group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
@@ -15,6 +15,30 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+
+## Roles and Variants
+
+Roles define what capabilities and responsibilities a client has. A client declares its supported roles in the [`client/hello`](#client--server-clienthello) message, and the server determines which roles to activate based on what it implements.
+
+### Base Roles
+
+The following base roles are defined in this specification and must be implemented by all servers: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages).
+
+### Role Variants
+
+Roles can have variants using the `@` character: `<base>@<variant>` (e.g., `visualizer@wip1`, `player@experimental`). Servers may implement variants but are not required to.
+
+### Application-Specific Roles
+
+Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also have variants: `_myapp_visualizer@v2`.
+
+### Priority and Activation
+
+Clients list roles in `supported_roles` in priority order. If a client supports multiple variants or both a variant and base role, all supported options should be listed with the most preferred first.
+
+The server activates only one role per family (everything before `@`) - the first match it implements from the priority-ordered list. Roles that require capabilities negotiation should have a corresponding support object with a matching name (e.g., `player` has `player_support`, `visualizer@wip1` would have `visualizer@wip1_support`).
+
+The server reports which roles were actually activated in the `activated_roles` field of [`server/hello`](#server--client-serverhello).
 
 ## Establishing a Connection
 
@@ -97,12 +121,18 @@ Binary message IDs organize bits into fields: **bits 7-2** identify the role typ
 - `000000xx` (0-3): Player role
 - `000001xx` (4-7): Artwork role
 - `000010xx` (8-11): Visualizer role
+- `000011xx` (12-15): Controller role (reserved for future use)
+- `000100xx` (16-19): Metadata role (reserved for future use)
+- Roles 5-47 (IDs 20-191): Reserved for future base roles
+- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
 **Message slots within each role:**
 - Slot 0: `xxxxxx00`
 - Slot 1: `xxxxxx01`
 - Slot 2: `xxxxxx10`
 - Slot 3: `xxxxxx11`
+
+**Note:** Role variants share the same binary message IDs as their base role (e.g., `visualizer@wip1` uses role 2, IDs 8-11).
 
 ## Clock Synchronization
 
@@ -201,7 +231,7 @@ Players that can output audio should have the role `player`.
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Resonate version)
 - `version`: integer - version that the Resonate client implements
-- `supported_roles`: string[] - at least one of:
+- `supported_roles`: string[] - roles supported by the client in priority order (first is most preferred). Can include base roles, variants (using `@`), and application-specific roles (starting with `_`). Base roles are:
   - `player` - outputs audio
   - `controller` - controls the current Resonate group
   - `metadata` - displays text metadata describing the currently playing audio
@@ -210,6 +240,8 @@ Players that can output audio should have the role `player`.
 - `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
 - `artwork_support?`: object - only if `artwork` role is set ([see artwork support object details](#client--server-clienthello-artwork-support-object))
 - `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
+
+**Note:** Role variants and application-specific roles may include support objects following the same naming pattern: role name + `_support` suffix (e.g., `visualizer@wip1` → `visualizer@wip1_support`, `_myapp_display` → `_myapp_display_support`). Their structure and whether they are required is outside the scope of this specification.
 
 ### Client → Server: `client/time`
 
@@ -227,6 +259,7 @@ Only after receiving this message should the client send any other messages (inc
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
 - `version`: integer - latest supported version of Resonate
+- `activated_roles`: string[] - roles that were activated for this client
 
 ### Server → Client: `server/time`
 
