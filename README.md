@@ -421,7 +421,7 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 #### Command behaviour
 
-- 'play' - resume playback from current position
+- 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
 - 'pause' - pause playback at current position
 - 'stop' - stop playback and reset position to beginning
 - 'next' - skip to next track in queue
