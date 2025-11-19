@@ -16,6 +16,30 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
+## Role Versioning
+
+Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
+
+This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages). All servers must implement all versions of these roles described in this specification.
+
+All role names and versions not starting with `_` are reserved for future revisions of this specification.
+
+### Priority and Activation
+
+Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
+
+The server activates one version per role family (e.g., one `player@vN`, one `controller@vN`)—the first match it implements from the client's list. The server reports activated roles in `active_roles`.
+
+Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
+
+### Detecting Outdated Servers
+
+Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports a newer version of the specification and the server needs to be updated.
+
+### Application-Specific Roles
+
+Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`.
+
 ## Establishing a Connection
 
 Resonate has two standard ways to establish connections: Server and Client initiated.
@@ -97,12 +121,16 @@ Binary message IDs organize bits into fields: **bits 7-2** identify the role typ
 - `000000xx` (0-3): Player role
 - `000001xx` (4-7): Artwork role
 - `000010xx` (8-11): Visualizer role
+- Roles 3-47 (IDs 12-191): Reserved for future roles
+- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
 **Message slots within each role:**
 - Slot 0: `xxxxxx00`
 - Slot 1: `xxxxxx01`
 - Slot 2: `xxxxxx10`
 - Slot 3: `xxxxxx11`
+
+**Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 0-3).
 
 ## Clock Synchronization
 
@@ -200,16 +228,18 @@ Players that can output audio should have the role `player`.
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Resonate version)
-- `version`: integer - version that the Resonate client implements
-- `supported_roles`: string[] - at least one of:
-  - `player` - outputs audio
-  - `controller` - controls the current Resonate group
-  - `metadata` - displays text metadata describing the currently playing audio
-  - `artwork` - displays artwork images
-  - `visualizer` - visualizes audio
-- `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
-- `artwork_support?`: object - only if `artwork` role is set ([see artwork support object details](#client--server-clienthello-artwork-support-object))
-- `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
+- `version`: integer (must be `1`) - version of the core message format that the Resonate client implements (independent of role versions)
+- `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
+  - `player@v1` - outputs audio
+  - `controller@v1` - controls the current Resonate group
+  - `metadata@v1` - displays text metadata describing the currently playing audio
+  - `artwork@v1` - displays artwork images
+  - `visualizer@v1` - visualizes audio
+- `player@v1_support?`: object - only if `player@v1` is listed ([see player support object details](#client--server-clienthello-player-support-object))
+- `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork support object details](#client--server-clienthello-artwork-support-object))
+- `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
+
+**Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
 ### Client → Server: `client/time`
 
@@ -226,7 +256,10 @@ Only after receiving this message should the client send any other messages (inc
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
-- `version`: integer - latest supported version of Resonate
+- `version`: integer (must be `1`) - version of the core message format that the server implements (independent of role versions)
+- `active_roles`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`)
+
+**Note:** Clients can assume that the server is up-to-date, meaning `active_roles` will equal their `supported_roles`.
 
 ### Server → Client: `server/time`
 
@@ -248,11 +281,15 @@ For the initial message, include all state fields. For subsequent updates, only 
 
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Client → Server: `client/command`
 
 Client sends commands to the server. Contains command objects based on the client's supported roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
+
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
 ### Server → Client: `server/state`
 
@@ -263,11 +300,15 @@ Only include fields that have changed. The client will merge these updates into 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Server → Client: `server/command`
 
 Server sends commands to the client. Contains role-specific command objects.
 
 - `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
+
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
 ### Server → Client: `stream/start`
 
@@ -277,6 +318,8 @@ When a new stream starts.
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Server → Client: `stream/update`
 
 Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
@@ -285,12 +328,16 @@ Sent when the format of the binary stream changes. Contains delta updates with o
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Client → Server: `stream/request-format`
 
 Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
 Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
 
