@@ -451,8 +451,6 @@ This section describes messages specific to clients with the `metadata` role, wh
 
 The `metadata` object in [`server/state`](#server--client-serverstate) has this structure:
 
-Clients can calculate the current track position at any time using the last received values: `current_track_progress_ms = max(min(metadata.track_progress + (current_time - metadata.timestamp) * metadata.playback_speed / 1000000, metadata.track_duration), 0)`
-
 - `metadata`: object
   - `timestamp`: integer - server clock time in microseconds for when this metadata is valid
   - `title?`: string | null - track title
@@ -462,11 +460,25 @@ Clients can calculate the current track position at any time using the last rece
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
   - `year?`: integer | null - release year
   - `track?`: integer | null - track number
-  - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
-  - `track_duration?`: integer | null - total track length in milliseconds
-  - `playback_speed?`: integer | null - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed)
+  - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
+    - `track_progress`: integer - current playback position in milliseconds since start of track
+    - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
+    - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
+
+#### Calculating current track position
+
+Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the last metadata message that included the `progress` object:
+
+```python
+calculated_progress = metadata.progress.track_progress + (current_time - metadata.timestamp) * metadata.progress.playback_speed / 1000000
+
+if metadata.progress.track_duration != 0:
+    current_track_progress_ms = max(min(calculated_progress, metadata.progress.track_duration), 0)
+else:
+    current_track_progress_ms = max(calculated_progress, 0)
+```
 
 ## Artwork messages
 This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
