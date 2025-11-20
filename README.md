@@ -467,6 +467,20 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
+**Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
+
+1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
+2. Apply the delta to each player's volume
+3. Clamp any player volumes that exceed boundaries (0-100%)
+4. If any players were clamped:
+   - Calculate the lost delta: `sum of (proposed_volume - clamped_volume)` for all clamped players
+   - Divide the lost delta equally among non-clamped players
+   - Repeat steps 1-4 until either:
+     - All delta has been successfully applied, or
+     - All players are clamped at their volume boundaries
+
+This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
+
 **Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
 
 For clients **with** the `player` role, the cycle includes:
@@ -486,6 +500,8 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
+
+**Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
 
 ## Metadata messages
