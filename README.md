@@ -327,7 +327,7 @@ This section describes messages specific to clients with the `player` role, whic
 The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `player_support`: object
-  - `support_formats`: object[] - list of supported audio formats in priority order (first is preferred)
+  - `supported_formats`: object[] - list of supported audio formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
