@@ -333,6 +333,8 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
+**Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+
 ### Client → Server: `client/state` player object
 
 The `player` object in [`client/state`](#client--server-clientstate) has this structure:
@@ -483,6 +485,8 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 **Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
+
+**Note:** Servers must support all image formats: 'jpeg', 'png', and 'bmp'.
 
 ### Client → Server: `stream/request-format` artwork object
 
