@@ -630,8 +630,9 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 ```json
 {
 	"visualizer_support": {
-		"types": [2,3,4],
+		"types": ["loudness","spectrum","beat"],
 		"buffer_capacity": 2048,
+    "batch_max": 32,
 		"spectrum": {
 			"n_disp_bins": 16,
 			"scale": "log",
@@ -643,7 +644,9 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 }
 ```
 , where:
-`types`: The Visualization Data Types supported/requested by the client. Server may ignore any types it doesn't support. See type definition in binary definition table below.  
+`types`: The Visualization Data Types supported/requested by the client. Server may ignore any types it doesn't support. See type definition in binary definition table below. Currently defined: `beat`, `loudness`, `f_peak`, and `spectrum`.  
+`buffer_capacity`: The maximum size in bytes of visualization messages that the client is able to buffer.  
+`batch_max`: The maximum number of logical messages with separate timestamps the server may batch into WebSockets binary message.  
 `n_disp_bins`: Number of display bins (i.e. bars on a graphical equalizer)  
 `scale`: One of `mel`, `log` (logarithmic), or `lin` (linear). Controls the mapping from FFT to display bins.  
 `f_min`: The minimum frequency where the lowest display band should start (reasonable default 20-40 Hz)  
@@ -669,19 +672,24 @@ The `visualizer` object in [`stream/update`](#server--client-streamupdate) has t
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `8` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
-- Rest of bytes: Visualizer binary data, uses a tag-value encoding. The following types are currently defined:
-
-| Type byte | Type name | Data type + length (bytes) | Unit |
-|---|---|---|---|
-|`0`| Reserved | - (0)
-|`1`| Beat detected at this timestamp | - (0)
-|`2`| Amplitude/Loudness | `uint16` (2) | % of peak?, logarithmically adj. to human hearing
-|`3`| Frequency with highest amplitude | `uint16` (2) | Hz
-|`4`| Spectrum / FFT | `byte` + `uint16[n]` (1 + 2*n) | First data byte number of display bins `n`, followed by `n`display bins from low to high freq., each an `uint16`
-
-Multiple data types may be appended in a single message, if they have the same timestamp.
-For example, the message `08 <8 timestamp bytes> 02 7F FF 03 04 00` both specifies the amplitude (~50% of peak) and the peak frequency (1024 Hz).
+- Byte 1: number of frames batched as part of this message. Each frame includes the timestamp and data bytes. Frames sent in one message must be in chronological order, with the earliest timestamp occuring first.
+- Bytes 2-9: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+- Rest of bytes: Visualizer binary data in a fixed format - the order is given by the server in the `stream/start` type array.
 
 
+| Type name | Data type + length (bytes) | Unit |
+|---|---|---|
+| `loudness` | `uint16` (2) | % of full scale, logarithmically adj. to human hearing
+| `f_peak` (Frequency with highest amplitude) | `uint16` (2) | Hz
+| `spectrum` (FFT) | `uint16[n]` (2*n) | `n` display bins from low to high freq., each an `uint16`. (`n` = `n_disp_bins` in `stream/start`)
 
+For example, for types `["loudness", "f_peak"]` the message `08 01 <8 timestamp bytes> 7F FF 04 00` both specifies the loudness (~50% of peak) and the peak frequency (1024 Hz).
+
+### Server → Client: Visualization Data - Beats (Binary)
+
+For the `beat` visualizer type, a separate binary message type is used.
+
+- Byte 0: message type `9` (uint8)
+- Byte 1: number of frames batched as part of this message. Each frame is simply the timestamp where a beat occurs. Frames sent in one message must be in chronological order, with the earliest timestamp occuring first.  
+- Byte 2-9: timestamp (big-endian int64) - server clock time in microseconds when the beat occurs
+- (Byte 10...): next beat timestamp (big-endian int64)...
