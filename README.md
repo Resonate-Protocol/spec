@@ -624,30 +624,72 @@ This section describes messages specific to clients with the `visualizer` role, 
 
 The `visualizer_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `visualizer_support`: object
-  - Desired FFT details (to be determined)
-  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer that are yet to be displayed
+- `visualizer_support`: object containing the desired FFT details:
+  
+
+```json
+{
+	"visualizer_support": {
+		"types": ["loudness","spectrum","beat"],
+		"buffer_capacity": 2048,
+    "batch_max": 32,
+		"spectrum": {
+			"n_disp_bins": 16,
+			"scale": "log",
+			"f_min": 20,
+			"f_max": 20000,
+			"rate_max": 60
+		}
+	}
+}
+```
+, where:
+`types`: The Visualization Data Types supported/requested by the client. Server may ignore any types it doesn't support. See type definition in binary definition table below. Currently defined: `beat`, `loudness`, `f_peak`, and `spectrum`.  
+`buffer_capacity`: The maximum size in bytes of visualization messages that the client is able to buffer.  
+`batch_max`: The maximum number of logical messages with separate timestamps the server may batch into WebSockets binary message.  
+`n_disp_bins`: Number of display bins (i.e. bars on a graphical equalizer)  
+`scale`: One of `mel`, `log` (logarithmic), or `lin` (linear). Controls the mapping from FFT to display bins.  
+`f_min`: The minimum frequency where the lowest display band should start (reasonable default 20-40 Hz)  
+`f_max`: The maximum frequency where the highest display band should end (reasonable default ~16-22 kHz)  
+`rate_max`: The maximum number of spectrum updates per second. (this is somewhat constrained by n_fft - this is just a maximum so that e.g. clients with a max. display refresh rate of 60 Hz don't receive e.g. 300 messages/second)  
 
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `visualizer`: object
-  - FFT details (to be determined)
+  - FFT details of actually streamed data (see above)
 
 ### Server → Client: `stream/update` visualizer object
 
 The `visualizer` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `visualizer`: object
-  - FFT details (to be determined)
+  - FFT details of actually streamed data (see above)
 
 ### Server → Client: Visualization Data (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `8` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device
-- Rest of bytes: visualization data
+- Byte 1: number of frames batched as part of this message. Each frame includes the timestamp and data bytes. Frames sent in one message must be in chronological order, with the earliest timestamp occuring first.
+- Bytes 2-9: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+- Rest of bytes: Visualizer binary data in a fixed format - the order is given by the server in the `stream/start` type array.
 
-The timestamp indicates when this visualization data should be displayed, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+
+| Type name | Data type + length (bytes) | Unit |
+|---|---|---|
+| `loudness` | `uint16` (2) | % of full scale, logarithmically adj. to human hearing
+| `f_peak` (Frequency with highest amplitude) | `uint16` (2) | Hz
+| `spectrum` (FFT) | `uint16[n]` (2*n) | `n` display bins from low to high freq., each an `uint16`. (`n` = `n_disp_bins` in `stream/start`)
+
+For example, for types `["loudness", "f_peak"]` the message `08 01 <8 timestamp bytes> 7F FF 04 00` both specifies the loudness (~50% of peak) and the peak frequency (1024 Hz).
+
+### Server → Client: Visualization Data - Beats (Binary)
+
+For the `beat` visualizer type, a separate binary message type is used.
+
+- Byte 0: message type `9` (uint8)
+- Byte 1: number of frames batched as part of this message. Each frame is simply the timestamp where a beat occurs. Frames sent in one message must be in chronological order, with the earliest timestamp occuring first.  
+- Byte 2-9: timestamp (big-endian int64) - server clock time in microseconds when the beat occurs
+- (Byte 10...): next beat timestamp (big-endian int64)...
