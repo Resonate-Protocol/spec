@@ -186,7 +186,12 @@ sequenceDiagram
 
     alt Player requests format change
         Client->>Server: stream/request-format (codec, sample_rate, etc)
-        Server->>Client: stream/update (new format)
+        Server->>Client: stream/end (roles: [player])
+        Server->>Client: stream/start (player: new format)
+    end
+
+    alt Seek operation
+        Server->>Client: stream/flush (roles: [player, visualizer])
     end
 
     alt Controller role
@@ -201,7 +206,7 @@ sequenceDiagram
         Server->>Client: server/command (player: volume, mute)
     end
 
-    Server->>Client: stream/end (stop playback)
+    Server->>Client: stream/end (ends all role streams)
     alt Player role
         Client->>Server: client/state (player idle state)
     end
@@ -304,19 +309,19 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-When a new stream starts.
+Starts a stream for one or more roles. Each role has an independent stream lifecycle. Only include role objects for the streams being started.
+
+If sent for a role that already has an active stream, updates the stream format without flushing buffers.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
-### Server → Client: `stream/update`
+### Server → Client: `stream/flush`
 
-Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
+Instructs clients to clear buffers without ending the stream. Used for seek operations.
 
-- `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
-- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
+- `roles?`: string[] - roles to flush ('player', 'visualizer'). If omitted, flushes all applicable roles
 
 ### Client → Server: `stream/request-format`
 
@@ -325,19 +330,15 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
+Response: [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
-Indicates the stream has ended.
+Ends the stream for one or more roles. Clients should stop processing and clear buffers for the specified roles.
 
-Clients with the `player` role should stop playback and clear buffers.
-
-Clients with the `visualizer` role should stop visualizing and clear buffers.
-
-No payload.
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 ### Server → Client: `group/update`
 
@@ -404,7 +405,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format.
+Response: [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -428,17 +429,6 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `sample_rate`: integer - sample rate to be used
   - `channels`: integer - channels to be used
   - `bit_depth`: integer - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
-
-### Server → Client: `stream/update` player object
-
-The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `player`: object
-  - `codec?`: string - codec to be used
-  - `sample_rate?`: integer - sample rate to be used
-  - `channels?`: integer - channels to be used
-  - `bit_depth?`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Server → Client: Audio Chunks (Binary)
@@ -568,7 +558,7 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with a [`stream/update`](#server--client-streamupdate-artwork-object) message containing the new format for the requested channel, followed by immediate artwork updates through binary messages.
+After receiving this message, the server responds with [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
@@ -587,17 +577,6 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
     - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
-
-### Server → Client: `stream/update` artwork object
-
-The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `artwork`: object
-  - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
-    - `source?`: 'album' | 'artist' | 'none' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
-    - `width?`: integer - width in pixels of the encoded image
-    - `height?`: integer - height in pixels of the encoded image
 
 ### Server → Client: Artwork (Binary)
 
@@ -631,13 +610,6 @@ The `visualizer_support` object in [`client/hello`](#client--server-clienthello)
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
-
-- `visualizer`: object
-  - FFT details (to be determined)
-
-### Server → Client: `stream/update` visualizer object
-
-The `visualizer` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
 
 - `visualizer`: object
   - FFT details (to be determined)
