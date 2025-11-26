@@ -14,7 +14,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each role (player, artwork, visualizer) has an independent stream lifecycle. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
 ## Establishing a Connection
 
@@ -349,6 +349,16 @@ Contains delta updates with only the changed fields. The client should merge the
 - `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
+
+#### Playback State and Stream Lifecycle
+
+The `playback_state` and stream lifecycle are independent concepts:
+
+- **`playing`**: Audio/visualization data is being sent. Streams remain active.
+- **`paused`**: No new audio/visualization data is sent, but streams remain active. Artwork continues to display. Metadata is retained.
+- **`stopped`**: Server sends `stream/end` (all roles). All buffers cleared, metadata/artwork cleared.
+
+Pausing does NOT require `stream/end`. The server simply stops sending binary data while keeping streams open. This allows artwork to remain visible and metadata to stay populated during pause.
 
 ### Client → Server: `client/goodbye`
 
