@@ -14,7 +14,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each role (player, artwork, visualizer) has an independent stream lifecycle. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
 ## Establishing a Connection
 
@@ -186,7 +186,6 @@ sequenceDiagram
 
     alt Player requests format change
         Client->>Server: stream/request-format (codec, sample_rate, etc)
-        Server->>Client: stream/end (roles: [player])
         Server->>Client: stream/start (player: new format)
     end
 
@@ -309,9 +308,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. Each role has an independent stream lifecycle. Only include role objects for the streams being started.
-
-If sent for a role that already has an active stream, updates the stream format without flushing buffers.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
@@ -321,7 +318,7 @@ If sent for a role that already has an active stream, updates the stream format 
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations.
 
-- `roles?`: string[] - roles to flush ('player', 'visualizer'). If omitted, flushes all applicable roles
+- `roles?`: string[] - which roles to flush: '[player](#server--client-streamflush-player)', '[visualizer](#server--client-streamflush-visualizer)', or both. If omitted, flushes both roles
 
 ### Client → Server: `stream/request-format`
 
@@ -330,13 +327,13 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
 
-Response: [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
+Response: [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. Clients should stop processing and clear buffers for the specified roles.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
 
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
@@ -350,15 +347,13 @@ Contains delta updates with only the changed fields. The client should merge the
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
-#### Playback State and Stream Lifecycle
+#### Playback State
 
-The `playback_state` and stream lifecycle are independent concepts:
+- **`playing`**: Audio is playing.
+- **`paused`**: Audio is not playing. Can be resumed.
+- **`stopped`**: Audio is not playing. Nothing is loaded. No active streams.
 
-- **`playing`**: Audio/visualization data is being sent. Streams remain active.
-- **`paused`**: No new audio/visualization data is sent, but streams remain active. Artwork continues to display. Metadata is retained.
-- **`stopped`**: Server sends `stream/end` (all roles). All buffers cleared, metadata/artwork cleared.
-
-Pausing does NOT require `stream/end`. The server simply stops sending binary data while keeping streams open. This allows artwork to remain visible and metadata to stay populated during pause.
+**Note:** Servers must keep `playback_state` accurate at all times. Clients can rely on this state to determine playback behavior.
 
 ### Client → Server: `client/goodbye`
 
@@ -415,7 +410,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) with the new format.
+Response: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -440,6 +435,10 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `channels`: integer - channels to be used
   - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+
+### Server → Client: `stream/flush` player
+
+When [`stream/flush`](#server--client-streamflush) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
 
 ### Server → Client: Audio Chunks (Binary)
 
@@ -568,7 +567,7 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with [`stream/end`](#server--client-streamend) followed by [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
+After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
@@ -623,6 +622,10 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 
 - `visualizer`: object
   - FFT details (to be determined)
+
+### Server → Client: `stream/flush` visualizer
+
+When [`stream/flush`](#server--client-streamflush) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
 
 ### Server → Client: Visualization Data (Binary)
 
