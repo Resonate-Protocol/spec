@@ -366,6 +366,8 @@ Upon receiving this message, the server should initiate the disconnect.
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
+**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Players must convert these values to appropriate amplitude for their audio hardware.
+
 ### Client → Server: `client/hello` player support object
 
 The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
@@ -467,6 +469,22 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
+#### Command behaviour
+
+- 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
+- 'pause' - pause playback at current position
+- 'stop' - stop playback and reset position to beginning
+- 'next' - skip to next track, chapter, etc.
+- 'previous' - skip to previous track, chapter, restart current, etc.
+- 'volume' - set group volume (requires `volume` parameter)
+- 'mute' - set group mute state (requires `mute` parameter)
+- 'repeat_off' - disable repeat mode
+- 'repeat_one' - repeat the current track continuously
+- 'repeat_all' - repeat all tracks continuously
+- 'shuffle' - randomize playback order
+- 'unshuffle' - restore original playback order
+- 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
 1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
@@ -483,7 +501,7 @@ This ensures that when setting group volume to 100%, all players will reach 100%
 
 **Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
 
-**Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
+#### Switch command cycle
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -520,15 +538,15 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `title?`: string | null - track title
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
-  - `album?`: string | null - album name
+  - `album?`: string | null - name of the album or release that this track belongs to
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer | null - release year
-  - `track?`: integer | null - track number
+  - `year?`: integer | null - release year in YYYY format
+  - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
   - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
     - `track_progress`: integer - current playback position in milliseconds since start of track
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
-  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
+  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 #### Calculating current track position
