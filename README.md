@@ -499,6 +499,8 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
+**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
+
 #### Switch command cycle
 
 For clients **with** the `player` role, the cycle includes:
@@ -520,6 +522,8 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `muted`: boolean - mute state of the whole group
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
+
+**Reading group mute:** Group mute is `true` only when all players in the group are muted. If some players are muted and others are not, group mute is `false`.
 
 
 ## Metadata messages
