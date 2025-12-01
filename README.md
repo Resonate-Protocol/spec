@@ -265,9 +265,9 @@ Players that can output audio should have the role `player`.
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
-- `player@v1_support?`: object - only if `player@v1` is listed ([see player support object details](#client--server-clienthello-player-support-object))
-- `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork support object details](#client--server-clienthello-artwork-support-object))
-- `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
+- `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
+- `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
+- `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
@@ -413,11 +413,11 @@ Upon receiving this message, the server should initiate the disconnect.
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
-### Client → Server: `client/hello` player support object
+### Client → Server: `client/hello` player@v1 support object
 
-The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `player@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `player_support`: object
+- `player@v1_support`: object
   - `supported_formats`: object[] - list of supported audio formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
@@ -438,8 +438,8 @@ State updates must be sent whenever any state changes, including when the volume
 
 - `player`: object
   - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
-  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
-  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
+  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
 
 ### Client → Server: `stream/request-format` player object
 
@@ -462,7 +462,7 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' - should be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
+  - `command`: 'volume' | 'mute' - should be one of the values listed in `supported_commands` in the [`player@v1_support`](#client--server-clienthello-playerv1-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -592,11 +592,11 @@ This section describes messages specific to clients with the `artwork` role, whi
 
 **Channels:** Artwork clients can support 1-4 independent channels, allowing them to display multiple related images. For example, a device could display album artwork on one channel while simultaneously showing artist photos or background images on other channels. Each channel operates independently with its own format, resolution, and source type (album or artist artwork).
 
-### Client → Server: `client/hello` artwork support object
+### Client → Server: `client/hello` artwork@v1 support object
 
-The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `artwork_support`: object
+- `artwork@v1_support`: object
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
@@ -667,11 +667,11 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
 
-### Client → Server: `client/hello` visualizer support object
+### Client → Server: `client/hello` visualizer@v1 support object
 
-The `visualizer_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `visualizer_support`: object
+- `visualizer@v1_support`: object
   - Desired FFT details (to be determined)
   - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer that are yet to be displayed
 
