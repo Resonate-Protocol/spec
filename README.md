@@ -353,7 +353,7 @@ Contains delta updates with only the changed fields. The client should merge the
 - **`paused`**: Audio is not playing. Can be resumed.
 - **`stopped`**: Audio is not playing. Nothing is loaded. No active streams.
 
-**Note:** Servers must keep `playback_state` accurate at all times. Clients can rely on this state to determine playback behavior and [which controls to display](#playback-controls).
+**Note:** Servers must keep `playback_state` accurate. Controllers can use this state to determine [which controls to display](#playback-controls).
 
 ### Client → Server: `client/goodbye`
 
