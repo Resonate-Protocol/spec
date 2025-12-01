@@ -190,7 +190,7 @@ sequenceDiagram
     end
 
     alt Seek operation
-        Server->>Client: stream/flush (roles: [player, visualizer])
+        Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
     alt Controller role
@@ -314,11 +314,11 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
-### Server → Client: `stream/flush`
+### Server → Client: `stream/clear`
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations.
 
-- `roles?`: string[] - which roles to flush: '[player](#server--client-streamflush-player)', '[visualizer](#server--client-streamflush-visualizer)', or both. If omitted, flushes both roles
+- `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 ### Client → Server: `stream/request-format`
 
@@ -436,9 +436,9 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
-### Server → Client: `stream/flush` player
+### Server → Client: `stream/clear` player
 
-When [`stream/flush`](#server--client-streamflush) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
+When [`stream/clear`](#server--client-streamclear) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
 
 ### Server → Client: Audio Chunks (Binary)
 
@@ -623,9 +623,9 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 - `visualizer`: object
   - FFT details (to be determined)
 
-### Server → Client: `stream/flush` visualizer
+### Server → Client: `stream/clear` visualizer
 
-When [`stream/flush`](#server--client-streamflush) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
+When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
 
 ### Server → Client: Visualization Data (Binary)
 
