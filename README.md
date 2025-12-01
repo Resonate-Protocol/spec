@@ -33,6 +33,25 @@ The server discovers available clients through mDNS and connects to each client 
 
 **Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
 
+#### Multiple Servers
+
+In environments with multiple Resonate servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
+
+Clients can only be connected to one server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
+
+When a second server connects, clients must:
+
+1. **Accept incoming connections**: Complete the handshake (send [`client/hello`](#client--server-clienthello), receive [`server/hello`](#server--client-serverhello)) with the new server before making any decisions.
+
+2. **Decide which server to keep**:
+   - If the new server's `connection_reason` is `'playback'` → switch to new server
+   - If the new server's `connection_reason` is `'discovery'` and the existing server connected with `'playback'` → keep existing server
+   - If both servers have `connection_reason: 'discovery'`:
+     - Prefer the server matching the stored last played server
+     - If neither matches (or no history), keep the existing server
+
+3. **Disconnect**: Send [`client/goodbye`](#client--server-clientgoodbye) with reason `'another_server'` to the server being disconnected, then close the connection.
+
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
@@ -43,6 +62,10 @@ If clients prefer to initiate the connection instead of waiting for the server t
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
 **Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
+
+#### Multiple Servers
+
+Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
 **Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
@@ -110,11 +133,13 @@ Clients continuously send `client/time` messages to maintain an accurate offset 
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients use their computed offset to translate server timestamps to their local clock for synchronized playback.
 
+**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Resonate-Protocol/time-filter) repository for a C++ implementation and [aioresonate](https://github.com/Resonate-Protocol/aioresonate/blob/main/aioresonate/client/time_sync.py) for a Python implementation.
+
 ## Playback Synchronization
 
 - Each client is responsible for maintaining synchronization with the server's timestamps
 - Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should mute its audio output and continue buffering until it can resume synchronized playback
+- When a client cannot maintain sync (e.g., buffer underrun), it should send the 'error' state via [`client/state`](#client--server-clientstate-player-object), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send the 'synchronized' state
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
@@ -129,7 +154,7 @@ sequenceDiagram
     Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio/Art/Visualization
 
     Client->>Server: client/hello (roles and capabilities)
-    Server->>Client: server/hello (server info)
+    Server->>Client: server/hello (server info, connection_reason)
 
     alt Player role
         Client->>Server: client/state (player: volume, muted, state)
@@ -180,6 +205,11 @@ sequenceDiagram
     alt Player role
         Client->>Server: client/state (player idle state)
     end
+
+    alt Graceful disconnect
+        Client->>Server: client/goodbye (reason)
+        Note over Client,Server: Server initiates disconnect
+    end
 ```
 
 ## Core messages
@@ -194,7 +224,7 @@ This message will be followed by a [`server/hello`](#server--client-serverhello)
 
 Players that can output audio should have the role `player`.
 
-- `client_id`: string - uniquely identifies the client for groups and de-duplication
+- `client_id`: string - uniquely identifies the client for groups and de-duplication. Should remain persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
 - `name`: string - friendly name of the client
 - `device_info?`: object - optional information about the device
   - `product_name?`: string - device model/product name
@@ -227,6 +257,9 @@ Only after receiving this message should the client send any other messages (inc
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
 - `version`: integer - latest supported version of Resonate
+- `connection_reason`: 'discovery' | 'playback' - only relevant for [server-initiated connections](#multiple-servers)
+  - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
+  - `playback` - server needs client for active or upcoming playback
 
 ### Server → Client: `server/time`
 
@@ -316,6 +349,19 @@ Contains delta updates with only the changed fields. The client should merge the
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
+### Client → Server: `client/goodbye`
+
+Sent by the client before gracefully closing the connection. This allows the client to inform the server why it is disconnecting.
+
+Upon receiving this message, the server should initiate the disconnect.
+
+- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request'
+  - `another_server` - client is switching to a different Resonate server. Server should not auto-reconnect but should show the client as available for future playback
+  - `shutdown` - client is shutting down. Server should not auto-reconnect
+  - `restart` - client is restarting and will reconnect. Server should auto-reconnect
+  - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
+
+**Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
@@ -325,13 +371,15 @@ This section describes messages specific to clients with the `player` role, whic
 The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `player_support`: object
-  - `support_formats`: object[] - list of supported audio formats in priority order (first is preferred)
+  - `supported_formats`: object[] - list of supported audio formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
+
+**Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
 ### Client → Server: `client/state` player object
 
@@ -343,8 +391,8 @@ State updates must be sent whenever any state changes, including when the volume
 
 - `player`: object
   - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
-  - `volume`: integer - range 0-100
-  - `muted`: boolean - mute state
+  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
+  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
 
 ### Client → Server: `stream/request-format` player object
 
@@ -367,7 +415,7 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' - must be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message
+  - `command`: 'volume' | 'mute' - should be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -398,10 +446,10 @@ The `player` object in [`stream/update`](#server--client-streamupdate) has this 
 Binary messages should be rejected if there is no active stream.
 
 - Byte 0: message type `0` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output by the device
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk should be sent to the device or speaker's audio output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
@@ -415,7 +463,7 @@ The `controller` object in [`client/command`](#client--server-clientcommand) has
 Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - must be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -434,6 +482,20 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'shuffle' - randomize playback order of tracks in the queue
 - 'unshuffle' - restore original playback order of tracks in the queue
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+
+**Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
+
+1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
+2. Apply the delta to each player's volume
+3. Clamp any player volumes that exceed boundaries (0-100%)
+4. If any players were clamped:
+   - Calculate the lost delta: `sum of (proposed_volume - clamped_volume)` for all clamped players
+   - Divide the lost delta equally among non-clamped players
+   - Repeat steps 1-4 until either:
+     - All delta has been successfully applied, or
+     - All players are clamped at their volume boundaries
+
+This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
 #### Switch command cycle
 
@@ -455,6 +517,8 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
 
+**Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
+
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
@@ -462,8 +526,6 @@ This section describes messages specific to clients with the `metadata` role, wh
 ### Server → Client: `server/state` metadata object
 
 The `metadata` object in [`server/state`](#server--client-serverstate) has this structure:
-
-Clients can calculate the current track position at any time using the last received values: `current_track_progress_ms = max(min(metadata.track_progress + (current_time - metadata.timestamp) * metadata.playback_speed / 1000000, metadata.track_duration), 0)`
 
 - `metadata`: object
   - `timestamp`: integer - server clock time in microseconds for when this metadata is valid
@@ -474,11 +536,25 @@ Clients can calculate the current track position at any time using the last rece
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
   - `year?`: integer | null - release year in YYYY format
   - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
-  - `track_progress?`: integer | null - current playback position in milliseconds (since start of track, at the given `timestamp`)
-  - `track_duration?`: integer | null - total track length in milliseconds
-  - `playback_speed?`: integer | null - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed)
+  - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
+    - `track_progress`: integer - current playback position in milliseconds since start of track
+    - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
+    - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
   - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat entire queue
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
+
+#### Calculating current track position
+
+Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the last metadata message that included the `progress` object:
+
+```python
+calculated_progress = metadata.progress.track_progress + (current_time - metadata.timestamp) * metadata.progress.playback_speed / 1000000
+
+if metadata.progress.track_duration != 0:
+    current_track_progress_ms = max(min(calculated_progress, metadata.progress.track_duration), 0)
+else:
+    current_track_progress_ms = max(calculated_progress, 0)
+```
 
 ## Artwork messages
 This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
@@ -499,6 +575,8 @@ The `artwork_support` object in [`client/hello`](#client--server-clienthello) ha
 **Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
+
+**Note:** Servers must support all image formats: 'jpeg', 'png', and 'bmp'.
 
 ### Client → Server: `stream/request-format` artwork object
 
