@@ -347,14 +347,6 @@ Contains delta updates with only the changed fields. The client should merge the
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
-#### Playback State
-
-- **`playing`**: Audio is playing.
-- **`paused`**: Audio is not playing. Can be resumed.
-- **`stopped`**: Audio is not playing. Nothing is loaded. No active streams.
-
-**Note:** Servers must keep `playback_state` accurate. Controllers can use this state to determine [which controls to display](#playback-controls).
-
 ### Client → Server: `client/goodbye`
 
 Sent by the client before gracefully closing the connection. This allows the client to inform the server why it is disconnecting.
@@ -501,14 +493,6 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `muted`: boolean - mute state of the whole group
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
-
-### Playback Controls
-
-Controller UIs should display controls based on the current [`playback_state`](#playback-state) and `supported_commands`:
-
-- **`playing`**: Show pause button (send `pause` command) if `pause` is in `supported_commands`
-- **`paused`**: Show play button (send `play` command) if `play` is in `supported_commands`
-- **`stopped`**: Show play button (send `play` command) if `play` is in `supported_commands`
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
