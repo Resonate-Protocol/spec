@@ -366,6 +366,8 @@ Upon receiving this message, the server should initiate the disconnect.
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
+**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Players must convert these values to appropriate amplitude for their audio hardware.
+
 ### Client → Server: `client/hello` player support object
 
 The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
