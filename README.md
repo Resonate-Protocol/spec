@@ -472,15 +472,15 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
 - 'pause' - pause playback at current position
 - 'stop' - stop playback and reset position to beginning
-- 'next' - skip to next track in queue
-- 'previous' - skip to previous track in queue
+- 'next' - skip to next track, chapter, etc.
+- 'previous' - skip to previous track, chapter, restart current, etc.
 - 'volume' - set group volume (requires `volume` parameter)
 - 'mute' - set group mute state (requires `mute` parameter)
 - 'repeat_off' - disable repeat mode
 - 'repeat_one' - repeat the current track continuously
-- 'repeat_all' - repeat the entire queue continuously
-- 'shuffle' - randomize playback order of tracks in the queue
-- 'unshuffle' - restore original playback order of tracks in the queue
+- 'repeat_all' - repeat all tracks continuously
+- 'shuffle' - randomize playback order
+- 'unshuffle' - restore original playback order
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
 
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
