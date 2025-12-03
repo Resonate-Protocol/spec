@@ -261,7 +261,7 @@ Only after receiving this message should the client send any other messages (inc
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
 - `version`: integer - latest supported version of Resonate
-- `connection_reason`: 'discovery' | 'playback' - only relevant for [server-initiated connections](#multiple-servers)
+- `connection_reason`: 'discovery' | 'playback' - only used for [server-initiated connections](#multiple-servers)
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
 
