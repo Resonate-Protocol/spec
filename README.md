@@ -18,7 +18,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
 
 ## Establishing a Connection
 
-Resonate has two standard ways to establish connections: Server and Client initiated.
+Resonate has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
 Resonate Servers must support both methods described below.
 
