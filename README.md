@@ -138,7 +138,7 @@ WebSocket binary messages are used to send audio chunks, media art, and visualiz
 
 ### Binary Message ID Structure
 
-Binary message IDs organize bits into fields: **bits 7-2** identify the role type, **bits 1-0** identify the message slot within that role. This allocates 4 message slots per role.
+Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
 
 **Role assignments:**
 - `000000xx` (0-3): Reserved for future use
@@ -149,11 +149,13 @@ Binary message IDs organize bits into fields: **bits 7-2** identify the role typ
 - Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
-**Message slots within each role:**
+**Message slots:**
 - Slot 0: `xxxxxx00`
 - Slot 1: `xxxxxx01`
 - Slot 2: `xxxxxx10`
 - Slot 3: `xxxxxx11`
+
+Roles with expanded allocations have slots 0-7.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
