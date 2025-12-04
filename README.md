@@ -1,20 +1,20 @@
-# The Resonate Protocol
+# The Sendspin Protocol
 
 _This is raw, unfiltered and experimental._
 
-Resonate is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
+Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
 ## Definitions
 
-- **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
+- **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
+- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Controller** - controls the Resonate group this client is part of
+  - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
-- **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
+- **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
 ## Role Versioning
 
@@ -42,24 +42,24 @@ Custom roles outside the specification start with `_` (e.g., `_myapp_controller`
 
 ## Establishing a Connection
 
-Resonate has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
+Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
-Resonate Servers must support both methods described below.
+Sendspin Servers must support both methods described below.
 
 ### Server Initiated Connections
 
 Clients announce their presence via mDNS using:
-- Service type: `_resonate._tcp.local.`
-- Port: The port the Resonate client is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+- Service type: `_sendspin._tcp.local.`
+- Port: The port the Sendspin client is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
-**Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
+**Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
 #### Multiple Servers
 
-In environments with multiple Resonate servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
+In environments with multiple Sendspin servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
 
 Clients can only be connected to one server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
 
@@ -79,19 +79,19 @@ When a second server connects, clients must:
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
-- Service type: `_resonate-server._tcp.local.`
-- Port: The port the Resonate server is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+- Service type: `_sendspin-server._tcp.local.`
+- Port: The port the Sendspin server is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
-**Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
+**Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
 #### Multiple Servers
 
 Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
-**Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+**Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
 While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
@@ -165,7 +165,7 @@ Clients continuously send `client/time` messages to maintain an accurate offset 
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients use their computed offset to translate server timestamps to their local clock for synchronized playback.
 
-**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Resonate-Protocol/time-filter) repository for a C++ implementation and [aioresonate](https://github.com/Resonate-Protocol/aioresonate/blob/main/aioresonate/client/time_sync.py) for a Python implementation.
+**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 ## Playback Synchronization
 
@@ -251,7 +251,7 @@ sequenceDiagram
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
 
-Every Resonate client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
+Every Sendspin client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
 ### Client → Server: `client/hello`
 
@@ -265,11 +265,11 @@ Players that can output audio should have the role `player`.
 - `device_info?`: object - optional information about the device
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
-  - `software_version?`: string - software version of the client (not the Resonate version)
-- `version`: integer (must be `1`) - version of the core message format that the Resonate client implements (independent of role versions)
+  - `software_version?`: string - software version of the client (not the Sendspin version)
+- `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
-  - `controller@v1` - controls the current Resonate group
+  - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
@@ -407,7 +407,7 @@ Sent by the client before gracefully closing the connection. This allows the cli
 Upon receiving this message, the server should initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request'
-  - `another_server` - client is switching to a different Resonate server. Server should not auto-reconnect but should show the client as available for future playback
+  - `another_server` - client is switching to a different Sendspin server. Server should not auto-reconnect but should show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
@@ -498,7 +498,7 @@ Binary messages should be rejected if there is no active stream.
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
 ## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
+This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
 
 Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
 
