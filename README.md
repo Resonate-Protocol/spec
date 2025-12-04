@@ -141,10 +141,12 @@ WebSocket binary messages are used to send audio chunks, media art, and visualiz
 Binary message IDs organize bits into fields: **bits 7-2** identify the role type, **bits 1-0** identify the message slot within that role. This allocates 4 message slots per role.
 
 **Role assignments:**
-- `000000xx` (0-3): Player role
-- `000001xx` (4-7): Artwork role
-- `000010xx` (8-11): Visualizer role
-- Roles 3-47 (IDs 12-191): Reserved for future roles
+- `000000xx` (0-3): Reserved for future use
+- `000001xx` (4-7): Player role
+- `000010xx` (8-11): Artwork role
+- `000011xx` (12-15): Reserved for a future role
+- `00010xxx` (16-23): Visualizer role
+- Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
 **Message slots within each role:**
@@ -153,7 +155,7 @@ Binary message IDs organize bits into fields: **bits 7-2** identify the role typ
 - Slot 2: `xxxxxx10`
 - Slot 3: `xxxxxx11`
 
-**Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 0-3).
+**Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
 ## Clock Synchronization
 
@@ -202,13 +204,13 @@ sequenceDiagram
 
     loop During playback
         alt Player role
-            Server->>Client: binary Type 0 (audio chunks with timestamps)
+            Server->>Client: binary Type 4 (audio chunks with timestamps)
         end
         alt Artwork role
-            Server->>Client: binary Types 4-7 (artwork channels 0-3)
+            Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
         alt Visualizer role
-            Server->>Client: binary Type 8 (visualization data)
+            Server->>Client: binary Type 16 (visualization data)
         end
     end
 
@@ -485,7 +487,7 @@ When [`stream/clear`](#server--client-streamclear) includes the player role, cli
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `0` (uint8)
+- Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Rest of bytes: encoded audio frame
 
@@ -651,15 +653,15 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `4`-`7` (uint8) - corresponds to artwork channel 0-3 respectively
+- Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
 - Rest of bytes: encoded image
 
 The message type determines which artwork channel this image is for:
-- Type `4`: Channel 0 (Artwork role, slot 0)
-- Type `5`: Channel 1 (Artwork role, slot 1)
-- Type `6`: Channel 2 (Artwork role, slot 2)
-- Type `7`: Channel 3 (Artwork role, slot 3)
+- Type `8`: Channel 0 (Artwork role, slot 0)
+- Type `9`: Channel 1 (Artwork role, slot 1)
+- Type `10`: Channel 2 (Artwork role, slot 2)
+- Type `11`: Channel 3 (Artwork role, slot 3)
 
 The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
 
@@ -691,7 +693,7 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `8` (uint8)
+- Byte 0: message type `16` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device
 - Rest of bytes: visualization data
 
