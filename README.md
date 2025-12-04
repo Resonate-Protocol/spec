@@ -14,7 +14,7 @@ Resonate is a multi-room music experience protocol. The goal of the protocol is 
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
 - **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
 ## Role Versioning
 
@@ -42,7 +42,7 @@ Custom roles outside the specification start with `_` (e.g., `_myapp_controller`
 
 ## Establishing a Connection
 
-Resonate has two standard ways to establish connections: Server and Client initiated.
+Resonate has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
 Resonate Servers must support both methods described below.
 
@@ -214,7 +214,11 @@ sequenceDiagram
 
     alt Player requests format change
         Client->>Server: stream/request-format (codec, sample_rate, etc)
-        Server->>Client: stream/update (new format)
+        Server->>Client: stream/start (player: new format)
+    end
+
+    alt Seek operation
+        Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
     alt Controller role
@@ -229,7 +233,7 @@ sequenceDiagram
         Server->>Client: server/command (player: volume, mute)
     end
 
-    Server->>Client: stream/end (stop playback)
+    Server->>Client: stream/end (ends all role streams)
     alt Player role
         Client->>Server: client/state (player idle state)
     end
@@ -288,7 +292,7 @@ Only after receiving this message should the client send any other messages (inc
 - `name`: string - friendly name of the server
 - `version`: integer (must be `1`) - version of the core message format that the server implements (independent of role versions)
 - `active_roles`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`)
-- `connection_reason`: 'discovery' | 'playback' - only relevant for [server-initiated connections](#multiple-servers)
+- `connection_reason`: 'discovery' | 'playback' - only used for [server-initiated connections](#multiple-servers)
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
 
@@ -345,7 +349,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-When a new stream starts.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
@@ -353,15 +357,13 @@ When a new stream starts.
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-### Server → Client: `stream/update`
+### Server → Client: `stream/clear`
 
-Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
+Instructs clients to clear buffers without ending the stream. Used for seek operations.
 
-- `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
-- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
+- `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
-[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+[Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
 ### Client → Server: `stream/request-format`
 
@@ -372,19 +374,15 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
+Response: [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
-Indicates the stream has ended.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
 
-Clients with the `player` role should stop playback and clear buffers.
-
-Clients with the `visualizer` role should stop visualizing and clear buffers.
-
-No payload.
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 ### Server → Client: `group/update`
 
@@ -412,6 +410,8 @@ Upon receiving this message, the server should initiate the disconnect.
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
+
+**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Players must convert these values to appropriate amplitude for their audio hardware.
 
 ### Client → Server: `client/hello` player@v1 support object
 
@@ -451,7 +451,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format.
+Response: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -477,16 +477,9 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
-### Server → Client: `stream/update` player object
+### Server → Client: `stream/clear` player
 
-The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `player`: object
-  - `codec?`: string - codec to be used
-  - `sample_rate?`: integer - sample rate to be used
-  - `channels?`: integer - channels to be used
-  - `bit_depth?`: integer - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+When [`stream/clear`](#server--client-streamclear) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
 
 ### Server → Client: Audio Chunks (Binary)
 
@@ -514,6 +507,22 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
+#### Command behaviour
+
+- 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
+- 'pause' - pause playback at current position
+- 'stop' - stop playback and reset position to beginning
+- 'next' - skip to next track, chapter, etc.
+- 'previous' - skip to previous track, chapter, restart current, etc.
+- 'volume' - set group volume (requires `volume` parameter)
+- 'mute' - set group mute state (requires `mute` parameter)
+- 'repeat_off' - disable repeat mode
+- 'repeat_one' - repeat the current track continuously
+- 'repeat_all' - repeat all tracks continuously
+- 'shuffle' - randomize playback order
+- 'unshuffle' - restore original playback order
+- 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
 1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
@@ -528,7 +537,9 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
-**Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
+**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
+
+#### Switch command cycle
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -550,6 +561,7 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
+**Reading group mute:** Group mute is `true` only when all players in the group are muted. If some players are muted and others are not, group mute is `false`.
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
@@ -563,15 +575,15 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `title?`: string | null - track title
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
-  - `album?`: string | null - album name
+  - `album?`: string | null - name of the album or release that this track belongs to
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer | null - release year
-  - `track?`: integer | null - track number
+  - `year?`: integer | null - release year in YYYY format
+  - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
   - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
     - `track_progress`: integer - current playback position in milliseconds since start of track
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
-  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
+  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 #### Calculating current track position
@@ -615,7 +627,7 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with a [`stream/update`](#server--client-streamupdate-artwork-object) message containing the new format for the requested channel, followed by immediate artwork updates through binary messages.
+After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
@@ -634,17 +646,6 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
     - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
-
-### Server → Client: `stream/update` artwork object
-
-The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `artwork`: object
-  - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
-    - `source?`: 'album' | 'artist' | 'none' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
-    - `width?`: integer - width in pixels of the encoded image
-    - `height?`: integer - height in pixels of the encoded image
 
 ### Server → Client: Artwork (Binary)
 
@@ -682,12 +683,9 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 - `visualizer`: object
   - FFT details (to be determined)
 
-### Server → Client: `stream/update` visualizer object
+### Server → Client: `stream/clear` visualizer
 
-The `visualizer` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `visualizer`: object
-  - FFT details (to be determined)
+When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
 
 ### Server → Client: Visualization Data (Binary)
 
