@@ -388,6 +388,8 @@ Ends the stream for one or more roles. When received, clients should stop output
 
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
+[Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
+
 ### Server → Client: `group/update`
 
 State update of the group this client is part of.
