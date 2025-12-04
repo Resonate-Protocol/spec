@@ -630,7 +630,7 @@ Request the server to change the artwork format for a specific channel. The clie
 After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
-  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
+  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
   - `source?`: 'album' | 'artist' | 'none' - artwork source type
   - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
   - `media_width?`: integer - requested max width in pixels
