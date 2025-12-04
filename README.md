@@ -296,7 +296,7 @@ Only after receiving this message should the client send any other messages (inc
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
 
-**Note:** Clients can assume that the server is up-to-date, meaning `active_roles` will equal their `supported_roles`.
+**Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
 ### Server → Client: `server/time`
 
