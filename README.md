@@ -332,10 +332,14 @@ When a client sets `state: 'external_source'`, it indicates the client's output 
 
 #### Server behavior when `state` changes to `'external_source'`:
 
+If the client is in a multi-client group:
 1. Remember the client's current group as its "previous group" (see [switch command cycle](#switch-command-cycle))
 2. Move the client to a new solo group (stopped)
    - Send [`group/update`](#server--client-groupupdate) with the new group information
    - Send [`stream/end`](#server--client-streamend) for all active streams
+
+If the client is already in a solo group:
+- Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
 
 ### Client → Server: `client/command`
 
