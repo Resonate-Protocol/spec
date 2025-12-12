@@ -396,7 +396,7 @@ State update of the group this client is part of.
 
 Contains delta updates with only the changed fields. The client should merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
-- `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
+- `playback_state?`: 'playing' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
