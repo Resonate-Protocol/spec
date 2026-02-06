@@ -449,7 +449,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
-  - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_static_delay'
+  - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
@@ -467,6 +467,7 @@ State updates must be sent whenever any state changes, including when the volume
   - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `static_delay_ms`: integer - static delay in milliseconds (0-5000), always required for players
+  - `supported_commands?`: string[] - subset of: 'set_static_delay'
 
 **Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections.
 
@@ -491,7 +492,7 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' | 'set_static_delay' - should be one of the values listed in `supported_commands` in the [`player@v1_support`](#client--server-clienthello-playerv1-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
+  - `command`: 'volume' | 'mute' | 'set_static_delay' - must be listed in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object) or from [`client/state`](#client--server-clientstate-player-object); unlisted commands are ignored by the client
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
   - `static_delay_ms?`: integer - delay in milliseconds (0-5000), only set if `command` is `set_static_delay`
