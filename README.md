@@ -469,7 +469,7 @@ State updates must be sent whenever any state changes, including when the volume
   - `static_delay_ms`: integer - static delay in milliseconds (0-5000), always required for players
   - `supported_commands?`: string[] - subset of: 'set_static_delay'
 
-**Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections.
+**Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections. Clients may update `static_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
 ### Client → Server: `stream/request-format` player object
 
