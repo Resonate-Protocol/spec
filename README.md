@@ -738,17 +738,19 @@ Each frame is:
 - 8 bytes: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
 - Data bytes: visualization data in the order given by the `types` array in [`stream/start`](#server--client-streamstart-visualizer-object). The data length per frame is fixed for the duration of a stream
 
-| Type name | Data type + length (bytes) | Unit |
+All `uint16` values use the full range 0-65535, where 0 = silence and 65535 = full scale. The server applies perceptual weighting before encoding so clients can map values linearly to their display.
+
+| Type name | Data type + length (bytes) | Description |
 |---|---|---|
-| `loudness` | `uint16` (2) | % of full scale, logarithmically adjusted to human hearing |
-| `f_peak` (frequency with highest amplitude) | `uint16` (2) | Hz |
+| `loudness` | `uint16` (2) | Overall loudness, 0-65535 |
+| `f_peak` (frequency with highest amplitude) | `uint16` (2) | Frequency in Hz |
 | `spectrum` (FFT) | `uint16[n]` (2*n) | `n` display bins from low to high frequency, each a `uint16`. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object) |
 
 For example, for types `["loudness", "f_peak"]` a single-frame message `10 01 <8 timestamp bytes> 7F FF 04 00` specifies loudness (~50% of peak) and peak frequency (1024 Hz).
 
 ### Server → Client: Visualization Data - Beats (Binary)
 
-For the `beat` visualizer type, a separate binary message type is used.
+Beat events are sent separately from other visualization data using their own binary message type.
 
 - Byte 0: message type `17` (uint8)
 - Byte 1: number of frames batched in this message (uint8). Frames must be in chronological order, earliest first
