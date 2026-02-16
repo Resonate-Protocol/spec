@@ -1,41 +1,65 @@
-# The Resonate Protocol
+# The Sendspin Protocol
 
 _This is raw, unfiltered and experimental._
 
-Resonate is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
+Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
 ## Definitions
 
-- **Resonate Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Resonate Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
+- **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
+- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
-  - **Controller** - controls the Resonate group this client is part of
+  - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
-- **Resonate Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Resonate Stream** - client-specific details on how the server is formatting and sending binary data. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
+- **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+
+## Role Versioning
+
+Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
+
+This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages). All servers must implement all versions of these roles described in this specification.
+
+All role names and versions not starting with `_` are reserved for future revisions of this specification.
+
+### Priority and Activation
+
+Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
+
+The server activates one version per role family (e.g., one `player@vN`, one `controller@vN`)—the first match it implements from the client's list. The server reports activated roles in `active_roles`.
+
+Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
+
+### Detecting Outdated Servers
+
+Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports a newer version of the specification and the server needs to be updated.
+
+### Application-Specific Roles
+
+Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`.
 
 ## Establishing a Connection
 
-Resonate has two standard ways to establish connections: Server and Client initiated.
+Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
-Resonate Servers must support both methods described below.
+Sendspin Servers must support both methods described below.
 
 ### Server Initiated Connections
 
 Clients announce their presence via mDNS using:
-- Service type: `_resonate._tcp.local.`
-- Port: The port the Resonate client is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+- Service type: `_sendspin._tcp.local.`
+- Port: The port the Sendspin client is listening on (recommended: `8928`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
-**Note:** Do not manually connect to servers if you are advertising `_resonate._tcp`.
+**Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
 #### Multiple Servers
 
-In environments with multiple Resonate servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
+In environments with multiple Sendspin servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
 
 Clients can only be connected to one server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
 
@@ -55,19 +79,19 @@ When a second server connects, clients must:
 ### Client Initiated Connections
 
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
-- Service type: `_resonate-server._tcp.local.`
-- Port: The port the Resonate server is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/resonate`)
+- Service type: `_sendspin-server._tcp.local.`
+- Port: The port the Sendspin server is listening on (recommended: `8927`)
+- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
-**Note:** Do not advertise `_resonate._tcp` if the client plans to initiate the connection.
+**Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
 #### Multiple Servers
 
 Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
-**Note:** After this point, Resonate works independently of how the connection was established. The Resonate client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
+**Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
 While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
@@ -114,18 +138,26 @@ WebSocket binary messages are used to send audio chunks, media art, and visualiz
 
 ### Binary Message ID Structure
 
-Binary message IDs organize bits into fields: **bits 7-2** identify the role type, **bits 1-0** identify the message slot within that role. This allocates 4 message slots per role.
+Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
 
 **Role assignments:**
-- `000000xx` (0-3): Player role
-- `000001xx` (4-7): Artwork role
-- `000010xx` (8-11): Visualizer role
+- `000000xx` (0-3): Reserved for future use
+- `000001xx` (4-7): Player role
+- `000010xx` (8-11): Artwork role
+- `000011xx` (12-15): Reserved for a future role
+- `00010xxx` (16-23): Visualizer role
+- Roles 6-47 (IDs 24-191): Reserved for future roles
+- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
-**Message slots within each role:**
+**Message slots:**
 - Slot 0: `xxxxxx00`
 - Slot 1: `xxxxxx01`
 - Slot 2: `xxxxxx10`
 - Slot 3: `xxxxxx11`
+
+Roles with expanded allocations have slots 0-7.
+
+**Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
 ## Clock Synchronization
 
@@ -133,13 +165,13 @@ Clients continuously send `client/time` messages to maintain an accurate offset 
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients use their computed offset to translate server timestamps to their local clock for synchronized playback.
 
-**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Resonate-Protocol/time-filter) repository for a C++ implementation and [aioresonate](https://github.com/Resonate-Protocol/aioresonate/blob/main/aioresonate/client/time_sync.py) for a Python implementation.
+**Note**: For microsecond-level synchronization precision, consider using a two-dimensional Kalman filter to track both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 ## Playback Synchronization
 
 - Each client is responsible for maintaining synchronization with the server's timestamps
 - Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should send the 'error' state via [`client/state`](#client--server-clientstate-player-object), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send the 'synchronized' state
+- When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
@@ -156,8 +188,9 @@ sequenceDiagram
     Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/hello (server info, connection_reason)
 
+    Client->>Server: client/state (state: synchronized)
     alt Player role
-        Client->>Server: client/state (player: volume, muted, state)
+        Client->>Server: client/state (player: volume, muted)
     end
 
     loop Continuous clock sync
@@ -174,37 +207,38 @@ sequenceDiagram
 
     loop During playback
         alt Player role
-            Server->>Client: binary Type 0 (audio chunks with timestamps)
+            Server->>Client: binary Type 4 (audio chunks with timestamps)
         end
         alt Artwork role
-            Server->>Client: binary Types 4-7 (artwork channels 0-3)
+            Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
         alt Visualizer role
-            Server->>Client: binary Type 8 (visualization data)
+            Server->>Client: binary Type 16 (visualization data)
         end
     end
 
     alt Player requests format change
         Client->>Server: stream/request-format (codec, sample_rate, etc)
-        Server->>Client: stream/update (new format)
+        Server->>Client: stream/start (player: new format)
+    end
+
+    alt Seek operation
+        Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
     alt Controller role
         Client->>Server: client/command (controller: play/pause/volume/switch/etc)
     end
 
-    alt Player role state changes
-        Client->>Server: client/state (player state changes)
+    alt State changes
+        Client->>Server: client/state (state and/or player changes)
     end
 
     alt Server commands player
         Server->>Client: server/command (player: volume, mute)
     end
 
-    Server->>Client: stream/end (stop playback)
-    alt Player role
-        Client->>Server: client/state (player idle state)
-    end
+    Server->>Client: stream/end (ends all role streams)
 
     alt Graceful disconnect
         Client->>Server: client/goodbye (reason)
@@ -215,7 +249,7 @@ sequenceDiagram
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
 
-Every Resonate client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
+Every Sendspin client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
 ### Client → Server: `client/hello`
 
@@ -229,17 +263,19 @@ Players that can output audio should have the role `player`.
 - `device_info?`: object - optional information about the device
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
-  - `software_version?`: string - software version of the client (not the Resonate version)
-- `version`: integer - version that the Resonate client implements
-- `supported_roles`: string[] - at least one of:
-  - `player` - outputs audio
-  - `controller` - controls the current Resonate group
-  - `metadata` - displays text metadata describing the currently playing audio
-  - `artwork` - displays artwork images
-  - `visualizer` - visualizes audio
-- `player_support?`: object - only if `player` role is set ([see player support object details](#client--server-clienthello-player-support-object))
-- `artwork_support?`: object - only if `artwork` role is set ([see artwork support object details](#client--server-clienthello-artwork-support-object))
-- `visualizer_support?`: object - only if `visualizer` role is set ([see visualizer support object details](#client--server-clienthello-visualizer-support-object))
+  - `software_version?`: string - software version of the client (not the Sendspin version)
+- `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
+- `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
+  - `player@v1` - outputs audio
+  - `controller@v1` - controls the current Sendspin group
+  - `metadata@v1` - displays text metadata describing the currently playing audio
+  - `artwork@v1` - displays artwork images
+  - `visualizer@v1` - visualizes audio
+- `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
+- `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
+- `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
+
+**Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
 ### Client → Server: `client/time`
 
@@ -256,10 +292,13 @@ Only after receiving this message should the client send any other messages (inc
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
-- `version`: integer - latest supported version of Resonate
-- `connection_reason`: 'discovery' | 'playback' - only relevant for [server-initiated connections](#multiple-servers)
+- `version`: integer (must be `1`) - version of the core message format that the server implements (independent of role versions)
+- `active_roles`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`)
+- `connection_reason`: 'discovery' | 'playback' - only used for [server-initiated connections](#multiple-servers)
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
+
+**Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
 ### Server → Client: `server/time`
 
@@ -273,19 +312,42 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 ### Client → Server: `client/state`
 
-Client sends state updates to the server. Contains role-specific state objects based on the client's supported roles.
+Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello) for roles that report state (such as `player`), and whenever any state changes thereafter.
+Must be sent immediately after receiving [`server/hello`](#server--client-serverhello), and whenever any state changes thereafter.
 
 For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
+- `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
+  - `'synchronized'` - client is operational and synchronized with server timestamps
+  - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
+  - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
+
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
+### External Source Handling
+
+When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and is not currently participating in Sendspin playback with this server.
+
+#### Server behavior when `state` changes to `'external_source'`:
+
+If the client is in a multi-client group:
+1. Remember the client's current group as its "previous group" (see [switch command cycle](#switch-command-cycle))
+2. Move the client to a new solo group (stopped)
+   - Send [`group/update`](#server--client-groupupdate) with the new group information
+   - Send [`stream/end`](#server--client-streamend) for all active streams
+
+If the client is already in a solo group:
+- Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
 
 ### Client → Server: `client/command`
 
 Client sends commands to the server. Contains command objects based on the client's supported roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
+
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
 ### Server → Client: `server/state`
 
@@ -296,27 +358,33 @@ Only include fields that have changed. The client will merge these updates into 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Server → Client: `server/command`
 
 Server sends commands to the client. Contains role-specific command objects.
 
 - `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
 
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
 ### Server → Client: `stream/start`
 
-When a new stream starts.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
-### Server → Client: `stream/update`
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-Sent when the format of the binary stream changes. Contains delta updates with only the changed fields. The client should merge these updates into the existing stream configuration.
+### Server → Client: `stream/clear`
 
-- `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamupdate-player-object))
-- `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamupdate-artwork-object))
-- `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamupdate-visualizer-object))
+Instructs clients to clear buffers without ending the stream. Used for seek operations.
+
+- `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
+
+[Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
 ### Client → Server: `stream/request-format`
 
@@ -325,19 +393,19 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format for the requested role(s).
+[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
+Response: [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
-Indicates the stream has ended.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
 
-Clients with the `player` role should stop playback and clear buffers.
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
-Clients with the `visualizer` role should stop visualizing and clear buffers.
-
-No payload.
+[Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
 ### Server → Client: `group/update`
 
@@ -345,7 +413,7 @@ State update of the group this client is part of.
 
 Contains delta updates with only the changed fields. The client should merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
 
-- `playback_state?`: 'playing' | 'paused' | 'stopped' - playback state of the group
+- `playback_state?`: 'playing' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
@@ -356,7 +424,7 @@ Sent by the client before gracefully closing the connection. This allows the cli
 Upon receiving this message, the server should initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request'
-  - `another_server` - client is switching to a different Resonate server. Server should not auto-reconnect but should show the client as available for future playback
+  - `another_server` - client is switching to a different Sendspin server. Server should not auto-reconnect but should show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
@@ -366,11 +434,13 @@ Upon receiving this message, the server should initiate the disconnect.
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
-### Client → Server: `client/hello` player support object
+**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Players must convert these values to appropriate amplitude for their audio hardware.
 
-The `player_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+### Client → Server: `client/hello` player@v1 support object
 
-- `player_support`: object
+The `player@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `player@v1_support`: object
   - `supported_formats`: object[] - list of supported audio formats in priority order (first is preferred)
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
@@ -381,18 +451,19 @@ The `player_support` object in [`client/hello`](#client--server-clienthello) has
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
+**PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
+
 ### Client → Server: `client/state` player object
 
 The `player` object in [`client/state`](#client--server-clientstate) has this structure:
 
-Informs the server of player state changes. Only for clients with the `player` role.
+Informs the server of player-specific state changes. Only for clients with the `player` role.
 
 State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
-  - `state`: 'synchronized' | 'error' - state of the player, should always be `synchronized` unless there is an error preventing current or future playback (unable to keep up, issues keeping the clock in sync, etc)
-  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
-  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player_support`](#client--server-clienthello-player-support-object)
+  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
 
 ### Client → Server: `stream/request-format` player object
 
@@ -404,7 +475,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/update`](#server--client-streamupdate) with the new format.
+Response: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -415,7 +486,7 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' - should be one of the values listed in `supported_commands` in the [`player_support`](#client--server-clienthello-player-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
+  - `command`: 'volume' | 'mute' - should be one of the values listed in `supported_commands` in the [`player@v1_support`](#client--server-clienthello-playerv1-support-object) object in the [`client/hello`](#client--server-clienthello) message. Commands not in `supported_commands` are ignored by the client
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
 
@@ -430,29 +501,22 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
-### Server → Client: `stream/update` player object
+### Server → Client: `stream/clear` player
 
-The `player` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `player`: object
-  - `codec?`: string - codec to be used
-  - `sample_rate?`: integer - sample rate to be used
-  - `channels?`: integer - channels to be used
-  - `bit_depth?`: integer - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+When [`stream/clear`](#server--client-streamclear) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
 
 ### Server → Client: Audio Chunks (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `0` (uint8)
+- Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
 - Rest of bytes: encoded audio frame
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
 ## Controller messages
-This section describes messages specific to clients with the `controller` role, which enables the client to control the Resonate group this client is part of, and switch between groups.
+This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
 
 Every client which lists the `controller` role in the `supported_roles` of the `client/hello` message needs to implement all messages in this section.
 
@@ -466,6 +530,22 @@ Control the group that's playing and switch groups. Only valid from clients with
   - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+
+#### Command behaviour
+
+- 'play' - resume playback from current position. If nothing is currently playing, the server must try to resume the group's last playing media. This history should persist across server and client reboots
+- 'pause' - pause playback at current position
+- 'stop' - stop playback and reset position to beginning
+- 'next' - skip to next track, chapter, etc.
+- 'previous' - skip to previous track, chapter, restart current, etc.
+- 'volume' - set group volume (requires `volume` parameter)
+- 'mute' - set group mute state (requires `mute` parameter)
+- 'repeat_off' - disable repeat mode
+- 'repeat_one' - repeat the current track continuously
+- 'repeat_all' - repeat all tracks continuously
+- 'shuffle' - randomize playback order
+- 'unshuffle' - restore original playback order
+- 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
 
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
@@ -481,7 +561,11 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
-**Note:** When `command` is 'switch', the server moves this client to the next group in a predefined cycle:
+**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
+
+#### Switch command cycle
+
+**Previous group priority:** If the client is still in the solo group from its `'external_source'` transition, the `switch` command prioritizes rejoining the previous group.
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -503,6 +587,7 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
+**Reading group mute:** Group mute is `true` only when all players in the group are muted. If some players are muted and others are not, group mute is `false`.
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
@@ -516,15 +601,15 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `title?`: string | null - track title
   - `artist?`: string | null - primary artist(s)
   - `album_artist?`: string | null - album artist(s)
-  - `album?`: string | null - album name
+  - `album?`: string | null - name of the album or release that this track belongs to
   - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer | null - release year
-  - `track?`: integer | null - track number
+  - `year?`: integer | null - release year in YYYY format
+  - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
   - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
     - `track_progress`: integer - current playback position in milliseconds since start of track
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
-  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode
+  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 #### Calculating current track position
@@ -545,18 +630,18 @@ This section describes messages specific to clients with the `artwork` role, whi
 
 **Channels:** Artwork clients can support 1-4 independent channels, allowing them to display multiple related images. For example, a device could display album artwork on one channel while simultaneously showing artist photos or background images on other channels. Each channel operates independently with its own format, resolution, and source type (album or artist artwork).
 
-### Client → Server: `client/hello` artwork support object
+### Client → Server: `client/hello` artwork@v1 support object
 
-The `artwork_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `artwork_support`: object
+- `artwork@v1_support`: object
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
     - `media_width`: integer - max width in pixels
     - `media_height`: integer - max height in pixels
 
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 4), `channels[1]` is channel 1 (binary message type 5), etc.
+**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
@@ -568,10 +653,10 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with a [`stream/update`](#server--client-streamupdate-artwork-object) message containing the new format for the requested channel, followed by immediate artwork updates through binary messages.
+After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
-  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artwork-support-object)
+  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
   - `source?`: 'album' | 'artist' | 'none' - artwork source type
   - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
   - `media_width?`: integer - requested max width in pixels
@@ -588,30 +673,19 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
 
-### Server → Client: `stream/update` artwork object
-
-The `artwork` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `artwork`: object
-  - `channels?`: object[] - configuration updates for artwork channels, array index is the channel number
-    - `source?`: 'album' | 'artist' | 'none' - artwork source type
-    - `format?`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
-    - `width?`: integer - width in pixels of the encoded image
-    - `height?`: integer - height in pixels of the encoded image
-
 ### Server → Client: Artwork (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `4`-`7` (uint8) - corresponds to artwork channel 0-3 respectively
+- Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
 - Rest of bytes: encoded image
 
 The message type determines which artwork channel this image is for:
-- Type `4`: Channel 0 (Artwork role, slot 0)
-- Type `5`: Channel 1 (Artwork role, slot 1)
-- Type `6`: Channel 2 (Artwork role, slot 2)
-- Type `7`: Channel 3 (Artwork role, slot 3)
+- Type `8`: Channel 0 (Artwork role, slot 0)
+- Type `9`: Channel 1 (Artwork role, slot 1)
+- Type `10`: Channel 2 (Artwork role, slot 2)
+- Type `11`: Channel 3 (Artwork role, slot 3)
 
 The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
 
@@ -620,11 +694,11 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
 
-### Client → Server: `client/hello` visualizer support object
+### Client → Server: `client/hello` visualizer@v1 support object
 
-The `visualizer_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `visualizer_support`: object
+- `visualizer@v1_support`: object
   - `types`: string[] - visualization data types requested by the client. Server may ignore types it doesn't support. Currently defined: 'beat', 'loudness', 'f_peak', 'spectrum'
   - `buffer_capacity`: integer - max size in bytes of visualization messages that the client is able to buffer
   - `batch_max`: integer - max number of logical messages with separate timestamps the server may batch into a single WebSocket binary message
@@ -648,24 +722,15 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
     - `f_max`: integer - maximum frequency in Hz
     - `rate_max`: integer - spectrum updates per second
 
-### Server → Client: `stream/update` visualizer object
+### Server → Client: `stream/clear` visualizer
 
-The `visualizer` object in [`stream/update`](#server--client-streamupdate) has this structure with delta updates:
-
-- `visualizer`: object
-  - `types?`: string[] - visualization data types the server will stream
-  - `spectrum?`: object - spectrum configuration updates
-    - `n_disp_bins?`: integer - number of display bins
-    - `scale?`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
-    - `f_min?`: integer - minimum frequency in Hz
-    - `f_max?`: integer - maximum frequency in Hz
-    - `rate_max?`: integer - spectrum updates per second
+When [`stream/clear`](#server--client-streamclear) includes the visualizer role, clients should clear all buffered visualization data and continue with data received after this message.
 
 ### Server → Client: Visualization Data (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `8` (uint8)
+- Byte 0: message type `16` (uint8)
 - Byte 1: number of frames batched in this message (uint8)
 - Remaining bytes: frames in chronological order, earliest first
 
@@ -679,12 +744,12 @@ Each frame is:
 | `f_peak` (frequency with highest amplitude) | `uint16` (2) | Hz |
 | `spectrum` (FFT) | `uint16[n]` (2*n) | `n` display bins from low to high frequency, each a `uint16`. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object) |
 
-For example, for types `["loudness", "f_peak"]` a single-frame message `08 01 <8 timestamp bytes> 7F FF 04 00` specifies loudness (~50% of peak) and peak frequency (1024 Hz).
+For example, for types `["loudness", "f_peak"]` a single-frame message `10 01 <8 timestamp bytes> 7F FF 04 00` specifies loudness (~50% of peak) and peak frequency (1024 Hz).
 
 ### Server → Client: Visualization Data - Beats (Binary)
 
 For the `beat` visualizer type, a separate binary message type is used.
 
-- Byte 0: message type `9` (uint8)
+- Byte 0: message type `17` (uint8)
 - Byte 1: number of frames batched in this message (uint8). Frames must be in chronological order, earliest first
 - Remaining bytes: consecutive timestamps (big-endian int64 each) - server clock time in microseconds when each beat occurs
