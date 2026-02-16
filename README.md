@@ -270,10 +270,10 @@ Players that can output audio should have the role `player`.
   - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
-  - `visualizer@v1` - visualizes audio
+  - `visualizer@_draft_r1` - visualizes audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
-- `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
+- `visualizer@_draft_r1_support?`: object - only if `visualizer@_draft_r1` is listed ([see visualizer@_draft_r1 support object details](#client--server-clienthello-visualizer_draft_r1-support-object))
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
@@ -695,11 +695,11 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
 
-### Client → Server: `client/hello` visualizer@v1 support object
+### Client → Server: `client/hello` visualizer@_draft_r1 support object
 
-The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `visualizer@_draft_r1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
-- `visualizer@v1_support`: object
+- `visualizer@_draft_r1_support`: object
   - `types`: string[] - visualization data types requested by the client. Server may ignore types it doesn't support. Currently defined: 'beat', 'loudness', 'f_peak', 'spectrum'
   - `buffer_capacity`: integer - max size in bytes of visualization messages that the client is able to buffer
   - `batch_max`: integer - max number of logical messages with separate timestamps the server may batch into a single WebSocket binary message
