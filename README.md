@@ -716,6 +716,7 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 
 - `visualizer`: object
   - `types`: string[] - visualization data types the server will stream
+  - `batch_max`: integer - max number of frames the server will batch into a single binary message
   - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'
     - `n_disp_bins`: integer - number of display bins
     - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
