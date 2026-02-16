@@ -546,6 +546,7 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24)
+  - `controls?`: string[] - optional source control commands supported by this client (subset of: 'play' | 'pause' | 'next' | 'previous' | 'activate' | 'deactivate')
   - `features?`: object - optional feature hints
     - `level?`: boolean - true if source reports `level`
     - `line_sense?`: boolean - true if source reports `signal`
@@ -577,6 +578,7 @@ Example `client/hello` excerpt:
           "bit_depth": 16
         }
       ],
+      "controls": ["play", "pause", "next", "previous", "activate", "deactivate"],
       "features": {
         "line_sense": true,
         "level": true
@@ -621,10 +623,13 @@ Source clients may send commands to inform the server about user-initiated captu
 The `source` object in [`server/command`](#server--client-servercommand) has this structure:
 
 - `source`: object
-  - `command`: 'start' | 'stop'
+  - `command?`: 'start' | 'stop'
+  - `control?`: 'play' | 'pause' | 'next' | 'previous' | 'activate' | 'deactivate' - optional source control command; ignored if unsupported by the client
   - `vad?`: object - optional VAD settings hint
     - `threshold_db?`: number - signal threshold in dB
     - `hold_ms?`: integer - hold time in milliseconds
+
+All fields are optional. The server may send any subset (`command`, `control`, and/or `vad`) in one message.
 
 Example `server/command` to start capture:
 ```json
