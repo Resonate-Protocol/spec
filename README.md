@@ -388,10 +388,11 @@ Instructs clients to clear buffers without ending the stream. Used for seek oper
 
 ### Client → Server: `stream/request-format`
 
-Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
+Request different stream format (upgrade or downgrade). Available for clients with the `player`, `artwork`, or `visualizer` role.
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+- `visualizer?`: object - only for clients with the `visualizer` role ([see visualizer object details](#client--server-streamrequest-format-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -721,6 +722,14 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
     - `f_min`: integer - minimum frequency in Hz
     - `f_max`: integer - maximum frequency in Hz
     - `rate_max`: integer - spectrum updates per second
+
+### Client → Server: `stream/request-format` visualizer object
+
+<!-- TODO: define the visualizer object for stream/request-format -->
+
+The `visualizer` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+To be determined.
 
 ### Server → Client: `stream/clear` visualizer
 
