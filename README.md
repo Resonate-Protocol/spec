@@ -631,6 +631,30 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 All fields are optional. The server may send any subset (`command`, `control`, and/or `vad`) in one message.
 
+#### Source command semantics
+
+- `command` controls Sendspin ingest lifecycle for this source:
+  - `start`: server requests ingest to become active. The client should transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
+  - `stop`: server requests ingest to become inactive. The client should send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
+- `control` is optional upstream-device control intent and only applies when advertised in `source@v1_support.controls`.
+  - `play` | `pause` | `next` | `previous`: control content playback behavior on the upstream source device (if supported).
+  - `activate` | `deactivate`: prepare or power-manage the upstream source path (for example power on/off, wake/sleep, input enable/disable).
+
+`start`/`stop` and `play`/`pause` are independent:
+
+- `start`/`stop` govern whether Sendspin ingest is active.
+- `play`/`pause` govern upstream content playback behavior.
+
+#### Default ingest behavior
+
+- Effective default after handshake is `stop` (ingest inactive).
+- Server ingest interest is represented by `command: "start"` / `command: "stop"`.
+- Server implementations should ignore/drop source binary chunks while ingest is not active.
+
+#### `vad` semantics
+
+`vad` is an optional server hint for source-side line-sense behavior (`threshold_db`, `hold_ms`). It allows centralized tuning and consistent behavior across sources/groups. Clients may ignore unsupported hints.
+
 Example `server/command` to start capture:
 ```json
 {
