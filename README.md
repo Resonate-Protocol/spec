@@ -52,6 +52,7 @@ Clients announce their presence via mDNS using:
 - Service type: `_sendspin._tcp.local.`
 - Port: The port the Sendspin client is listening on (recommended: `8928`)
 - TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
+- TXT record: `name` key specifying the friendly name of the player (optional)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
@@ -82,6 +83,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 - Service type: `_sendspin-server._tcp.local.`
 - Port: The port the Sendspin server is listening on (recommended: `8927`)
 - TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
+- TXT record: `name` key specifying the friendly name of the server (optional)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
