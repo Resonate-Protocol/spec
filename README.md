@@ -176,6 +176,8 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 - When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
+- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers should schedule the first audio timestamp far enough in the future so clients can receive and queue initial chunks without missing playback start (see [`required_lead_time_ms`](#client--server-clienthello-playerv1-support-object))
+- For live streams, servers may need to delay playback to build and maintain players' [`min_buffer_ms`](#client--server-clienthello-playerv1-support-object) targets
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
 - Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback
 - Servers factor in each client's `static_delay_ms` when calculating how far ahead to send audio, keeping effective buffer headroom constant
@@ -451,9 +453,22 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
+  - `required_lead_time_ms?`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measure this from server transmit time of the start/restart trigger message ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
+  - `min_buffer_ms?`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and continuous-playback pipeline delays.
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+**Note:** `required_lead_time_ms` and `min_buffer_ms` should factor in expected network delay/jitter. On LAN/Wi-Fi they can be small; for remote or high-latency clients they should be increased. Do not include `static_delay_ms` in these values; the server applies `static_delay_ms` separately when calculating send-ahead.
+
+**Server behavior:**
+- For startup/restart timing, compute per-player send-ahead using `required_lead_time_ms + static_delay_ms`.
+- For grouped startup/restart, use a common send-ahead of `max(required_lead_time_ms + static_delay_ms)` across grouped players, plus optional `sync_guard_ms`.
+- For ongoing playback timing, compute per-player send-ahead using `min_buffer_ms + static_delay_ms`.
+- For live streams or other real-time content with grouped playback, use a common ongoing send-ahead of `max(min_buffer_ms + static_delay_ms)` across grouped players, plus optional `sync_guard_ms`.
+- For live streams, keep each player's minimum buffer duration at or above `min_buffer_ms` when possible, capped by the maximum buffer size advertised in `buffer_capacity`.
+- For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
+- `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
