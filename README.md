@@ -453,8 +453,8 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
-  - `required_lead_time_ms?`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measure this from server transmit time of the start/restart trigger message ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
-  - `min_buffer_ms?`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and continuous-playback pipeline delays.
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measure this from server transmit time of the start/restart trigger message ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
+  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and continuous-playback pipeline delays.
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
