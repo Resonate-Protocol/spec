@@ -465,8 +465,8 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 - For startup/restart timing, compute per-player send-ahead using `required_lead_time_ms + static_delay_ms`.
 - For grouped startup/restart, use a common send-ahead of `max(required_lead_time_ms + static_delay_ms)` across grouped players, plus optional `sync_guard_ms`.
 - For ongoing playback timing, compute per-player send-ahead using `min_buffer_ms + static_delay_ms`.
-- For live streams or other real-time content with grouped playback, use a common ongoing send-ahead of `max(min_buffer_ms + static_delay_ms)` across grouped players, plus optional `sync_guard_ms`.
-- For live streams, keep each player's minimum buffer duration at or above `min_buffer_ms` when possible, capped by the maximum buffer size advertised in `buffer_capacity`.
+- For live streams or other real-time content with grouped playback, use a common ongoing send-ahead of `max(min_buffer_ms + static_delay_ms)` across grouped players, plus optional `sync_guard_ms`. Recompute when players join, leave, or update their timing parameters.
+- Especially for live streams, servers must keep each player's ongoing buffer duration at or above its `min_buffer_ms`, capped by the maximum buffer size advertised in `buffer_capacity`.
 - For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
 - `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
 
