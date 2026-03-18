@@ -747,5 +747,5 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
   - `is_dark?`: boolean | null - true if the background color is dark, suggesting light-colored content on top
   - `background?`: integer[] | null - background color as `[R, G, B]` with values 0-255
   - `accent?`: integer[] | null - accent color as `[R, G, B]` with values 0-255
-  - `light?`: integer[] | null - a light color derived from the source material, suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255
-  - `dark?`: integer[] | null - a dark color derived from the source material, suitable for use on light backgrounds, as `[R, G, B]` with values 0-255
+  - `on_dark?`: integer[] | null - a light color derived from the source material, suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255
+  - `on_light?`: integer[] | null - a dark color derived from the source material, suitable for use on light backgrounds, as `[R, G, B]` with values 0-255
