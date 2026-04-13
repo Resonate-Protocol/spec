@@ -97,6 +97,58 @@ Unlike server-initiated connections, servers cannot reclaim clients by reconnect
 
 While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
 
+## Encryption
+
+Sendspin uses the [Noise Protocol Framework](https://noiseprotocol.org/) to protect communication between clients and servers. Encryption guards against rogue devices injecting commands or malicious data, and prevents eavesdropping on audio streams and metadata on the local network.
+
+Servers must implement encryption. Clients should implement encryption. Whether a server allows unencrypted clients is application-specific and not defined by this specification.
+
+Encryption operates at the message level. The WebSocket connection itself remains unencrypted — individual message payloads are encrypted after the Noise handshake completes. This allows the [`client/hello`](#client--server-clienthello) and [`server/hello`](#server--client-serverhello) handshake to remain plaintext on the same connection and provides compatibility with WebSocket proxies and load balancers.
+
+### Cipher Suites
+
+This specification defines two cipher suites. Servers must support both. Clients select their preferred suite in [`client/hello`](#client--server-clienthello) based on their hardware capabilities.
+
+- `25519_ChaChaPoly_SHA256` — Curve25519, ChaCha20-Poly1305, SHA-256. Fast in software, recommended for embedded devices without hardware AES (e.g., ESP32).
+- `25519_AESGCM_SHA256` — Curve25519, AES-256-GCM, SHA-256. Benefits from hardware AES acceleration on most modern CPUs, phones, and set-top boxes (AES-NI, ARM CE).
+
+### Pairing and Reconnection
+
+There are two encryption flows depending on whether the client has previously paired with this server.
+
+**Pairing (first connection):** The server presents the new client in its UI for user approval. Once approved, both sides perform an ephemeral Diffie-Hellman key exchange to derive a pre-shared key (PSK) without ever sending it over the wire:
+
+```
+PSK = HKDF-SHA256(dh_shared_secret, salt="sendspin-pairing", info="sendspin-psk")
+```
+
+This PSK bootstraps a Noise NNpsk0 handshake. Inside the resulting encrypted session, both sides exchange long-term static public keys for future reconnections. See [encryption messages](#encryption-messages) for the full message sequence.
+
+**Reconnection (previously paired):** The client includes its stored copy of the server's static public key in [`client/hello`](#client--server-clienthello). If the server recognizes the client, both sides perform a Noise KK handshake using stored static keys — one round trip, mutual cryptographic authentication, no user interaction.
+
+**Prologue binding:** For all Noise handshakes (NNpsk0 and KK), both sides must set the Noise handshake prologue to the concatenation of the raw `client/hello` and `server/hello` WebSocket text frame payloads, in that order. Each side uses the bytes it sent for its own message and the bytes it received for the peer's message. This binds the plaintext negotiation to the handshake — if an attacker modifies either hello message (e.g., changing the cipher suite), the handshake fails.
+
+**Initiator/responder:** The Sendspin client is always the Noise initiator and the Sendspin server is always the Noise responder, regardless of which side initiated the WebSocket connection.
+
+If the server does not recognize the client (e.g., the server's key was rotated or the client was revoked), the server responds with `paired: false` and the client falls back to the pairing flow.
+
+### Encrypted Message Format
+
+Once the Noise handshake completes, all WebSocket messages are sent as binary frames containing Noise ciphertext. The reserved binary message ID `0x00` distinguishes encrypted text messages from encrypted binary messages:
+
+- **Encrypted text message:** `0x00` + JSON bytes → encrypt → send as WebSocket binary frame
+- **Encrypted binary message:** original binary payload (existing type byte + data) → encrypt → send as WebSocket binary frame
+
+The receiver decrypts and checks the first byte: `0x00` means strip it and parse the rest as JSON; any other value is handled as a binary message using the existing [binary message ID structure](#binary-message-id-structure).
+
+Nonce management is handled automatically by the Noise transport state.
+
+### Key Storage
+
+Clients must support storing at least 5 server entries, using LRU (least recently used) eviction when the limit is reached. Each entry contains the `server_id` and the server's long-term static public key. The client also stores its own long-term static keypair (one keypair, used with all servers). All keys must persist across reboots.
+
+Servers store all approved clients with no limit defined by this specification. Each entry contains the `client_id` and the client's long-term static public key. The server also stores its own long-term static keypair. All keys must persist across reboots. Servers should provide a way for users to revoke individual clients, removing their stored key and forcing re-pairing.
+
 ## Communication
 
 Once the connection is established, Client and Server are going to talk.
@@ -104,7 +156,9 @@ Once the connection is established, Client and Server are going to talk.
 The first message must always be a `client/hello` message from the client to the server.
 Once the server receives this message, it responds with a `server/hello` message. Before this handshake is complete, no other messages should be sent.
 
-WebSocket text messages are used to send JSON payloads.
+If the client supports [encryption](#encryption), the `encryption/*` message exchange occurs immediately after the `client/hello` / `server/hello` handshake. Once the Noise handshake completes, all subsequent messages are encrypted and sent as WebSocket binary frames. See [encryption messages](#encryption-messages) for details.
+
+Without encryption, JSON payloads are sent as WebSocket text messages and binary payloads as WebSocket binary messages. With encryption, both are wrapped using the [encrypted message format](#encrypted-message-format) and sent as WebSocket binary frames.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
@@ -143,7 +197,8 @@ WebSocket binary messages are used to send audio chunks, media art, and visualiz
 Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
 
 **Role assignments:**
-- `000000xx` (0-3): Reserved for future use
+- `00000000` (0): [Encrypted text message sentinel](#encrypted-message-format)
+- `000000xx` (1-3): Reserved for future use
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
 - `000011xx` (12-15): Reserved for a future role
@@ -189,8 +244,25 @@ sequenceDiagram
 
     Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio/Art/Visualization
 
-    Client->>Server: client/hello (roles and capabilities)
-    Server->>Client: server/hello (server info, connection_reason)
+    Client->>Server: client/hello (roles, capabilities, encryption)
+    Server->>Client: server/hello (server info, connection_reason, encryption)
+
+    alt Encryption (client supports encryption)
+        alt Pairing (new client)
+            Note over Client,Server: Server shows client in UI, user approves
+            Server->>Client: encryption/approval (ephemeral DH public key)
+            Client->>Server: encryption/confirm (ephemeral DH public key)
+            Note over Client,Server: Both sides derive PSK via HKDF
+        end
+        Client->>Server: encryption/handshake (Noise handshake message)
+        Server->>Client: encryption/handshake (Noise handshake message)
+        Note over Client,Server: Noise session established, all further messages encrypted
+        alt Pairing (exchange long-term keys)
+            Client->>Server: encryption/keys (client static public key)
+            Server->>Client: encryption/keys (server static public key)
+            Note over Client,Server: Both sides persist keys for future reconnection
+        end
+    end
 
     Client->>Server: client/state (state: synchronized)
     alt Player role
@@ -275,9 +347,14 @@ Players that can output audio should have the role `player`.
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
+- `encryption?`: object - omitted if client does not support [encryption](#encryption)
+  - `suite`: string - preferred cipher suite: `'25519_ChaChaPoly_SHA256'` or `'25519_AESGCM_SHA256'`
+  - `server_static_key?`: string - Base64 encoded static public key of this server from a previous pairing. Enables [reconnection](#pairing-and-reconnection) via Noise KK handshake
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
+
+**Note:** This message is always sent as plaintext, even when encryption is supported.
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
@@ -292,7 +369,7 @@ Once received, the server responds with a [`server/time`](#server--client-server
 
 Response to the [`client/hello`](#client--server-clienthello) message with information about the server.
 
-Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
+Only after receiving this message should the client send any other messages. If [encryption](#encryption) is being negotiated, the `encryption/*` message exchange must complete before sending any non-encryption messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message).
 
 - `server_id`: string - identifier of the server
 - `name`: string - friendly name of the server
@@ -301,6 +378,10 @@ Only after receiving this message should the client send any other messages (inc
 - `connection_reason`: 'discovery' | 'playback' - only used for [server-initiated connections](#multiple-servers)
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
+- `encryption?`: object - included if the client sent an `encryption` object in [`client/hello`](#client--server-clienthello)
+  - `paired`: boolean - `true` if the server recognizes this client from a previous pairing and will proceed with a Noise KK reconnection handshake. `false` if the client is new and must wait for user approval via [`encryption/approval`](#server--client-encryptionapproval)
+
+**Note:** This message is always sent as plaintext, even when encryption is supported.
 
 **Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
@@ -318,7 +399,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello), and whenever any state changes thereafter.
+Must be sent immediately after the initial handshake completes: after receiving [`server/hello`](#server--client-serverhello) when encryption is not used, or after the `encryption/*` exchange completes when encryption is negotiated. It must also be sent whenever any state changes thereafter.
 
 For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
@@ -434,6 +515,49 @@ Upon receiving this message, the server should initiate the disconnect.
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
 
 **Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
+
+## Encryption messages
+This section describes messages used to establish an encrypted session between client and server. These messages are exchanged after the [`client/hello`](#client--server-clienthello) / [`server/hello`](#server--client-serverhello) handshake and before any other communication. All encryption messages are sent as plaintext JSON, except [`encryption/keys`](#bidirectional-encryptionkeys) which is the first encrypted message after the Noise handshake completes.
+
+### Server → Client: `encryption/approval`
+
+Sent after the user approves a new client in the server's UI. Begins the pairing key exchange.
+
+This message is always sent as plaintext.
+
+- `ephemeral_key`: string - Base64 encoded ephemeral Diffie-Hellman public key generated by the server
+
+### Client → Server: `encryption/confirm`
+
+Response to [`encryption/approval`](#server--client-encryptionapproval). After both sides exchange ephemeral keys, they independently derive the PSK as described in [Pairing and Reconnection](#pairing-and-reconnection) and proceed to the Noise NNpsk0 handshake.
+
+This message is always sent as plaintext.
+
+- `ephemeral_key`: string - Base64 encoded ephemeral Diffie-Hellman public key generated by the client
+
+### Server → Client: `encryption/denial`
+
+Sent when the user denies the client in the server's UI, or the server otherwise rejects the encryption request. The server disconnects after sending this message.
+
+This message is always sent as plaintext.
+
+- `reason?`: string - human-readable reason for the denial
+
+### Bidirectional: `encryption/handshake`
+
+Carries Noise handshake payloads. Used for both NNpsk0 (pairing) and KK (reconnection) patterns. The number of handshake messages depends on the Noise pattern being used.
+
+This message is always sent as plaintext.
+
+- `data`: string - Base64 encoded Noise handshake message bytes
+
+### Bidirectional: `encryption/keys`
+
+Exchanged inside the encrypted session immediately after the Noise handshake completes during pairing. Both sides send their long-term static public key. After receiving the other side's key, both sides persist it for future [reconnection](#pairing-and-reconnection).
+
+This is the first encrypted message. Not used during reconnection (both sides already have each other's keys).
+
+- `static_key`: string - Base64 encoded long-term static public key of the sender
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
