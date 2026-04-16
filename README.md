@@ -62,9 +62,9 @@ The server discovers available clients through mDNS and connects to each client 
 
 In environments with multiple Sendspin servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
 
-Clients can only be connected to one server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
+Clients can only be actively connected to one **paired** server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server"). Clients may additionally hold one [pairing connection](#connection-model) while a new server is being paired; see [encryption](#encryption) for details.
 
-When a second server connects, clients must:
+When a second **paired** server connects, clients must:
 
 1. **Accept incoming connections**: Complete the handshake (send [`client/hello`](#client--server-clienthello), receive [`server/hello`](#server--client-serverhello)) with the new server before making any decisions.
 
@@ -76,6 +76,8 @@ When a second server connects, clients must:
      - If neither matches (or no history), keep the existing server
 
 3. **Disconnect**: Send [`client/goodbye`](#client--server-clientgoodbye) with reason `'another_server'` to the server being disconnected, then close the connection.
+
+Unpaired servers cannot displace an active connection — they enter the pairing slot (see [connection model](#connection-model)) and are evaluated using these rules only after pairing completes.
 
 ### Client Initiated Connections
 
@@ -99,9 +101,9 @@ While custom connection methods are possible for specialized use cases (like rem
 
 ## Encryption
 
-Sendspin uses the [Noise Protocol Framework](https://noiseprotocol.org/) to protect communication between clients and servers. Encryption guards against rogue devices injecting commands or malicious data, and prevents eavesdropping on audio streams and metadata on the local network.
+Sendspin uses the [Noise Protocol Framework](https://noiseprotocol.org/) to protect communication between clients and servers. Encryption and authentication guard against rogue devices injecting commands or malicious data, hijacking speakers remotely, and eavesdropping on audio streams and metadata on the local network.
 
-Servers must implement encryption. Clients should implement encryption. Whether a server allows unencrypted clients is application-specific and not defined by this specification.
+Servers must implement encryption and must reject unencrypted clients by default. Servers may provide an advanced opt-in to allow unencrypted clients for legacy or DIY use cases. Clients should implement encryption; clients without encryption only work with servers that have enabled this opt-in.
 
 Encryption operates at the message level. The WebSocket connection itself remains unencrypted — individual message payloads are encrypted after the Noise handshake completes. This allows the [`client/hello`](#client--server-clienthello) and [`server/hello`](#server--client-serverhello) handshake to remain plaintext on the same connection and provides compatibility with WebSocket proxies and load balancers.
 
@@ -111,6 +113,13 @@ This specification defines two cipher suites. Servers must support both. Clients
 
 - `25519_ChaChaPoly_SHA256` — Curve25519, ChaCha20-Poly1305, SHA-256. Fast in software, recommended for embedded devices without hardware AES (e.g., ESP32).
 - `25519_AESGCM_SHA256` — Curve25519, AES-256-GCM, SHA-256. Benefits from hardware AES acceleration on most modern CPUs, phones, and set-top boxes (AES-NI, ARM CE).
+
+### Pairing Methods
+
+Clients advertise their pairing capability via the `pairing_method` field in [`client/hello`](#client--server-clienthello):
+
+- `button` — physical pairing button on the device. Pairing requires both server UI approval and a button press. **Recommended.**
+- `none` — no physical pairing mechanism. Pairing requires only server UI approval. **Discouraged** — vulnerable to rogue server pairing with no physical presence check.
 
 ### Pairing and Reconnection
 
@@ -124,13 +133,23 @@ PSK = HKDF-SHA256(dh_shared_secret, salt="sendspin-pairing", info="sendspin-psk"
 
 This PSK bootstraps a Noise NNpsk0 handshake. Inside the resulting encrypted session, both sides exchange long-term static public keys for future reconnections. See [encryption messages](#encryption-messages) for the full message sequence.
 
+For `pairing_method: 'button'`, the client must not respond with [`encryption/confirm`](#client--server-encryptionconfirm) until the user presses the pairing button; the server UI should prompt the user accordingly. Presses are only meaningful between receiving `encryption/approval` and sending `encryption/confirm`; all others must be ignored.
+
 **Reconnection (previously paired):** The client includes its stored copy of the server's static public key in [`client/hello`](#client--server-clienthello). If the server recognizes the client, both sides perform a Noise KK handshake using stored static keys — one round trip, mutual cryptographic authentication, no user interaction.
 
 **Prologue binding:** For all Noise handshakes (NNpsk0 and KK), both sides must set the Noise handshake prologue to the concatenation of the raw `client/hello` and `server/hello` WebSocket text frame payloads, in that order. Each side uses the bytes it sent for its own message and the bytes it received for the peer's message. This binds the plaintext negotiation to the handshake — if an attacker modifies either hello message (e.g., changing the cipher suite), the handshake fails.
 
 **Initiator/responder:** The Sendspin client is always the Noise initiator and the Sendspin server is always the Noise responder, regardless of which side initiated the WebSocket connection.
 
-If the server does not recognize the client (e.g., the server's key was rotated or the client was revoked), the server responds with `paired: false` and the client falls back to the pairing flow.
+**Identity change detection:** A key mismatch is detected when the client sent a stored `server_static_key` in [`client/hello`](#client--server-clienthello) but the server either responded with `paired: false`, or responded with `paired: true` followed by a failed Noise KK handshake. This can occur legitimately (server key rotation, client was revoked) or maliciously (active MITM attempting a downgrade attack). Before re-pairing, the server must surface a warning distinct from the normal "Pair with this speaker?" prompt for new clients, communicating both the identity change and the potential security risk. Example:
+
+> "This speaker's identity has changed since last connection. This could mean the speaker was reset, or someone may be intercepting your connection. Re-pair this speaker?"
+
+### Connection Model
+
+To allow a new server to be paired without disrupting active playback, clients may maintain up to two simultaneous connections: one **active** paired connection for application messages, and optionally one **pairing** connection currently in the pairing flow. Only one pairing connection at a time — if a second unpaired server connects while the pairing slot is occupied, the client drops the existing pairing connection and the new server takes the slot.
+
+**Discovery vs. pairing:** An unpaired server performing a `connection_reason: 'discovery'` connection does not trigger pairing. After the plaintext hello exchange, the server closes the connection and may display the client in its UI as "available, not paired". Pairing only starts when the user initiates it from the server UI, at which point the server opens a new connection with `connection_reason: 'playback'`. Paired discovery connections proceed normally — the KK handshake completes and the connection stays open, ready for playback.
 
 ### Encrypted Message Format
 
@@ -145,7 +164,7 @@ Nonce management is handled automatically by the Noise transport state.
 
 ### Key Storage
 
-Clients must support storing at least 5 server entries, using LRU (least recently used) eviction when the limit is reached. Each entry contains the `server_id` and the server's long-term static public key. The client also stores its own long-term static keypair (one keypair, used with all servers). All keys must persist across reboots.
+Clients must support storing at least 5 server entries, using LRU (least recently used) eviction as part of a successful pairing when the limit is reached. Each entry contains the `server_id` and the server's long-term static public key. The client also stores its own long-term static keypair (one keypair, used with all servers). All keys must persist across reboots.
 
 Servers store all approved clients with no limit defined by this specification. Each entry contains the `client_id` and the client's long-term static public key. The server also stores its own long-term static keypair. All keys must persist across reboots. Servers should provide a way for users to revoke individual clients, removing their stored key and forcing re-pairing.
 
@@ -248,9 +267,10 @@ sequenceDiagram
     Server->>Client: server/hello (server info, connection_reason, encryption)
 
     alt Encryption (client supports encryption)
-        alt Pairing (new client)
+        alt Pairing (new client, connection_reason: playback)
             Note over Client,Server: Server shows client in UI, user approves
             Server->>Client: encryption/approval (ephemeral DH public key)
+            Note over Client,Server: If pairing_method: button, server UI prompts user to press button on client
             Client->>Server: encryption/confirm (ephemeral DH public key)
             Note over Client,Server: Both sides derive PSK via HKDF
         end
@@ -349,6 +369,7 @@ Players that can output audio should have the role `player`.
   - `visualizer@v1` - visualizes audio
 - `encryption?`: object - omitted if client does not support [encryption](#encryption)
   - `suite`: string - preferred cipher suite: `'25519_ChaChaPoly_SHA256'` or `'25519_AESGCM_SHA256'`
+  - `pairing_method`: string - `'button'` or `'none'`. See [pairing methods](#pairing-methods)
   - `server_static_key?`: string - Base64 encoded static public key of this server from a previous pairing. Enables [reconnection](#pairing-and-reconnection) via Noise KK handshake
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
@@ -379,7 +400,7 @@ Only after receiving this message should the client send any other messages. If 
   - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
   - `playback` - server needs client for active or upcoming playback
 - `encryption?`: object - included if the client sent an `encryption` object in [`client/hello`](#client--server-clienthello)
-  - `paired`: boolean - `true` if the server recognizes this client from a previous pairing and will proceed with a Noise KK reconnection handshake. `false` if the client is new and must wait for user approval via [`encryption/approval`](#server--client-encryptionapproval)
+  - `paired`: boolean - `true` if the server recognizes this client from a previous pairing (proceeds with Noise KK handshake). `false` if not recognized — server then follows the [discovery vs. pairing](#connection-model) rules based on `connection_reason`
 
 **Note:** This message is always sent as plaintext, even when encryption is supported.
 
@@ -529,7 +550,7 @@ This message is always sent as plaintext.
 
 ### Client → Server: `encryption/confirm`
 
-Response to [`encryption/approval`](#server--client-encryptionapproval). After both sides exchange ephemeral keys, they independently derive the PSK as described in [Pairing and Reconnection](#pairing-and-reconnection) and proceed to the Noise NNpsk0 handshake.
+Response to [`encryption/approval`](#server--client-encryptionapproval). For `pairing_method: 'button'`, the client must wait for the pairing button press before sending this message; for `pairing_method: 'none'`, the client sends this message immediately. After both sides exchange ephemeral keys, they independently derive the PSK as described in [Pairing and Reconnection](#pairing-and-reconnection) and proceed to the Noise NNpsk0 handshake.
 
 This message is always sent as plaintext.
 
