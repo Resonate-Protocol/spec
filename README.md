@@ -109,7 +109,7 @@ Encryption operates at the message level. The WebSocket connection itself remain
 
 ### Cipher Suites
 
-This specification defines two cipher suites. Servers must support both. Clients select their preferred suite in [`client/hello`](#client--server-clienthello) based on their hardware capabilities.
+This specification defines two cipher suites. Servers must support both. Clients select their preferred suite in [`client/hello`](#client--server-clienthello) based on their hardware capabilities. Servers must use the client's selected suite. There is no negotiation or fallback.
 
 - `25519_ChaChaPoly_SHA256` — Curve25519, ChaCha20-Poly1305, SHA-256. Fast in software, recommended for embedded devices without hardware AES (e.g., ESP32).
 - `25519_AESGCM_SHA256` — Curve25519, AES-256-GCM, SHA-256. Benefits from hardware AES acceleration on most modern CPUs, phones, and set-top boxes (AES-NI, ARM CE).
