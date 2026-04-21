@@ -574,7 +574,7 @@ This message is always sent as plaintext.
 
 ### Bidirectional: `encryption/keys`
 
-Exchanged inside the encrypted session immediately after the Noise handshake completes during pairing. Both sides send their long-term static public key. After receiving the other side's key, both sides persist it for future [reconnection](#pairing-and-reconnection).
+Exchanged inside the encrypted session immediately after the Noise handshake completes during pairing. The client sends its `encryption/keys` first; the server responds with its own after receiving the client's. After receiving the other side's key, both sides persist it for future [reconnection](#pairing-and-reconnection).
 
 This is the first encrypted message. Not used during reconnection (both sides already have each other's keys).
 
