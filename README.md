@@ -128,7 +128,7 @@ There are two encryption flows depending on whether the client has previously pa
 **Pairing (first connection):** The server presents the new client in its UI for user approval. Once approved, both sides perform an ephemeral Diffie-Hellman key exchange to derive a pre-shared key (PSK) without ever sending it over the wire:
 
 ```
-PSK = HKDF-SHA256(dh_shared_secret, salt="sendspin-pairing", info="sendspin-psk")
+PSK = HKDF-SHA256(dh_shared_secret, salt="sendspin-pairing", info="sendspin-psk", L=32)
 ```
 
 This PSK bootstraps a Noise NNpsk0 handshake. Inside the resulting encrypted session, both sides exchange long-term static public keys for future reconnections. See [encryption messages](#encryption-messages) for the full message sequence.
