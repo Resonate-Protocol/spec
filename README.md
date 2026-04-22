@@ -137,7 +137,7 @@ For `pairing_method: 'button'`, the client must not respond with [`encryption/co
 
 **Reconnection (previously paired):** The client includes its stored copy of the server's static public key in [`client/hello`](#client--server-clienthello). If the server recognizes the client, both sides perform a Noise KK handshake using stored static keys — one round trip, mutual cryptographic authentication, no user interaction.
 
-**Prologue binding:** For all Noise handshakes (NNpsk0 and KK), both sides must set the Noise handshake prologue to the concatenation of the raw `client/hello` and `server/hello` WebSocket text frame payloads, in that order. Each side uses the bytes it sent for its own message and the bytes it received for the peer's message. This binds the plaintext negotiation to the handshake — if an attacker modifies either hello message (e.g., changing the cipher suite), the handshake fails.
+**Prologue binding:** For all Noise handshakes (NNpsk0 and KK), both sides must set the Noise handshake prologue to the concatenation of the raw `client/hello` and `server/hello` WebSocket text frame payloads, in that order. Each side uses the bytes it sent for its own message and the bytes it received for the peer's message. Implementations must retain the exact bytes as sent and received; re-serializing parsed JSON is not guaranteed to produce identical bytes and will break the handshake. This binds the plaintext negotiation to the handshake — if an attacker modifies either hello message (e.g., changing the cipher suite), the handshake fails.
 
 **Initiator/responder:** The Sendspin client is always the Noise initiator and the Sendspin server is always the Noise responder, regardless of which side initiated the WebSocket connection.
 
