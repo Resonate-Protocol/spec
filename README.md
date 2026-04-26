@@ -7,11 +7,12 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, metadata, controller, artwork, lyrics, visualizer, color). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
+  - **Lyrics** - displays track lyrics or karaoke subtitles. Has preferred format for lyrics data
   - **Visualizer** - visualizes music. Has preferred format for audio features
   - **Color** - receives colors derived from the current audio
 - **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
@@ -21,7 +22,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`lyrics`](#lyrics-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -147,7 +148,7 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `000000xx` (0-3): Reserved for future use
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Reserved for a future role
+- `000011xx` (12-15): Lyrics role
 - `00010xxx` (16-23): Visualizer role
 - Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
@@ -217,6 +218,9 @@ sequenceDiagram
         alt Artwork role
             Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
+        alt Lyrics role
+            Server->>Client: binary Types 12-13 (lyrics channels 0-1)
+        end
         alt Visualizer role
             Server->>Client: binary Type 16 (visualization data)
         end
@@ -275,10 +279,12 @@ Players that can output audio should have the role `player`.
   - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
+  - `lyrics@v1` - displays track lyrics or karaoke subtitles
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
+- `lyrics@v1_support?`: object - only if `lyrics@v1` is listed ([see lyrics@v1 support object details](#client--server-clienthello-lyricsv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
@@ -381,6 +387,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
+- `lyrics?`: object - only sent to clients with the `lyrics` role ([see lyrics object details](#server--client-streamstart-lyrics-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
@@ -399,6 +406,7 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+- `lyrics?`: object - only for clients with the `lyrics` role ([see lyrics object details](#client--server-streamrequest-format-lyrics-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -410,7 +418,7 @@ Response: [`stream/start`](#server--client-streamstart) for the requested role(s
 
 Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
 
-- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'lyrics', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
@@ -702,6 +710,64 @@ The message type determines which artwork channel this image is for:
 The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
+
+## Lyrics messages
+This section describes messages specific to clients with the `lyrics` role, which handle display of track lyrics and karaoke subtitles. Lyrics clients receive lyrics data in their preferred format delivered as binary messages.
+
+**Channels:** Lyrics clients can support 1-2 independent channels. This allows a client to simultaneously receive multiple lyrics formats (e.g., plain LRC text on one channel and CDG karaoke data on another). Each channel operates independently with its own format.
+
+**Supported formats:**
+- `lrc` - LRC text format with embedded timestamps (UTF-8 encoded)
+- `cdg` - CD+G karaoke format (binary)
+
+**No transport timestamps:** Unlike audio or artwork, lyrics binary messages do not carry a server clock timestamp. Timing information is embedded within the lyrics data itself (e.g., `[mm:ss.xx]` tags in LRC, frame timing in CDG). The server sends lyrics at the start of each track; clients begin processing as soon as they receive them.
+
+### Client → Server: `client/hello` lyrics@v1 support object
+
+The `lyrics@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `lyrics@v1_support`: object
+  - `channels`: object[] - list of supported lyrics channels (length 1-2), array index is the channel number
+    - `format`: 'lrc' | 'cdg' | 'none' - requested lyrics format
+
+**None format:** If a channel has `format` set to `none`, the server will not send any lyrics data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-lyrics-object) without needing to re-establish the WebSocket connection.
+
+**Note:** Servers must support all lyrics formats: 'lrc' and 'cdg'.
+
+### Client → Server: `stream/request-format` lyrics object
+
+The `lyrics` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+Request the server to change the lyrics format for a specific channel.
+
+After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the lyrics role with the new format, followed by an immediate lyrics update through a binary message.
+
+- `lyrics`: object
+  - `channel`: integer - channel number (0-1) corresponding to the channel index declared in the lyrics [`client/hello`](#client--server-clienthello-lyricsv1-support-object)
+  - `format?`: 'lrc' | 'cdg' | 'none' - requested lyrics format
+
+### Server → Client: `stream/start` lyrics object
+
+The `lyrics` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `lyrics`: object
+  - `channels`: object[] - configuration for each active lyrics channel, array index is the channel number
+    - `format`: 'lrc' | 'cdg' | 'none' - format of the lyrics data
+
+### Server → Client: Lyrics (Binary)
+
+Binary messages should be rejected if there is no active stream.
+
+- Byte 0: message type `12`-`13` (uint8) - corresponds to lyrics channel 0-1 respectively
+- Rest of bytes: lyrics data (UTF-8 encoded text for `lrc`; binary data for `cdg`)
+
+The message type determines which lyrics channel this data is for:
+- Type `12`: Channel 0 (Lyrics role, slot 0)
+- Type `13`: Channel 1 (Lyrics role, slot 1)
+
+The server sends lyrics data at the start of each track and resends after a track change. Clients begin processing the lyrics data immediately upon receipt.
+
+**Clearing lyrics:** To indicate that no lyrics are available for the current track on a specific channel, the server sends an empty binary message (only the message type byte, with no lyrics data) for that channel.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
