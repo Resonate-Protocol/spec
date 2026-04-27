@@ -7,12 +7,13 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
+  - **Color** - receives colors derived from the current audio
 - **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 
@@ -20,7 +21,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -207,7 +208,7 @@ sequenceDiagram
     end
 
     Server->>Client: group/update (playback_state, group_id, group_name)
-    Server->>Client: server/state (metadata, controller)
+    Server->>Client: server/state (metadata, controller, color)
 
     loop During playback
         alt Player role
@@ -275,6 +276,7 @@ Players that can output audio should have the role `player`.
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
+  - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
@@ -361,6 +363,7 @@ Only include fields that have changed. The client will merge these updates into 
 
 - `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
+- `color?`: object - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -731,3 +734,19 @@ Binary messages should be rejected if there is no active stream.
 - Rest of bytes: visualization data
 
 The timestamp indicates when this visualization data should be displayed, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+
+## Color messages
+This section describes messages specific to clients with the `color` role, which receive colors derived from the current audio. Colors may be extracted from album artwork, provided by the music source, or manually programmed by the server.
+
+### Server → Client: `server/state` color object
+
+The `color` object in [`server/state`](#server--client-serverstate) has this structure:
+
+- `color`: object
+  - `timestamp`: integer - server clock time in microseconds for when these colors are valid
+  - `background_dark?`: integer[] | null - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
+  - `background_light?`: integer[] | null - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
+  - `primary?`: integer[] | null - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
+  - `accent?`: integer[] | null - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
+  - `on_dark?`: integer[] | null - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255
+  - `on_light?`: integer[] | null - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255
