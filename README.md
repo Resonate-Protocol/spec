@@ -593,6 +593,8 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
+  - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
+  - `shuffle`: boolean - shuffle mode enabled/disabled
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
@@ -618,8 +620,6 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
     - `track_progress`: integer - current playback position in milliseconds since start of track
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
-  - `repeat?`: 'off' | 'one' | 'all' | null - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
-  - `shuffle?`: boolean | null - shuffle mode enabled/disabled
 
 #### Calculating current track position
 
