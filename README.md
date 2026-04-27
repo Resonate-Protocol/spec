@@ -219,7 +219,7 @@ sequenceDiagram
             Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
         alt Lyrics role
-            Server->>Client: binary Types 12-13 (lyrics channels 0-1)
+            Server->>Client: binary Type 12 (lyrics data)
         end
         alt Visualizer role
             Server->>Client: binary Type 16 (visualization data)
@@ -714,8 +714,6 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 ## Lyrics messages
 This section describes messages specific to clients with the `lyrics` role, which handle display of track lyrics and karaoke subtitles. Lyrics clients receive lyrics data in their preferred format delivered as binary messages.
 
-**Channels:** Lyrics clients can support 1-2 independent channels. This allows a client to simultaneously receive multiple lyrics formats (e.g., plain LRC text on one channel and CDG karaoke data on another). Each channel operates independently with its own format.
-
 **Supported formats:**
 - `lrc` - LRC text format with embedded timestamps (UTF-8 encoded)
 - `cdg` - CD+G karaoke format (binary)
@@ -727,10 +725,8 @@ This section describes messages specific to clients with the `lyrics` role, whic
 The `lyrics@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `lyrics@v1_support`: object
-  - `channels`: object[] - list of supported lyrics channels (length 1-2), array index is the channel number
-    - `format`: 'lrc' | 'cdg' | 'none' - requested lyrics format
-
-**None format:** If a channel has `format` set to `none`, the server will not send any lyrics data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-lyrics-object) without needing to re-establish the WebSocket connection.
+  - `supported_formats`: string[] - list of supported lyrics formats in priority order (first is preferred), e.g. `['lrc', 'cdg']`
+  - `max_size_bytes`: integer - maximum size in bytes of lyrics data the client can handle per binary message. If the lyrics for the current track exceed this limit, the server must send [`stream/end`](#server--client-streamend) for the lyrics role instead of the binary data.
 
 **Note:** Servers must support all lyrics formats: 'lrc' and 'cdg'.
 
@@ -738,36 +734,30 @@ The `lyrics@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 The `lyrics` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
 
-Request the server to change the lyrics format for a specific channel.
+Request the server to change the lyrics format.
 
 After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the lyrics role with the new format, followed by an immediate lyrics update through a binary message.
 
 - `lyrics`: object
-  - `channel`: integer - channel number (0-1) corresponding to the channel index declared in the lyrics [`client/hello`](#client--server-clienthello-lyricsv1-support-object)
-  - `format?`: 'lrc' | 'cdg' | 'none' - requested lyrics format
+  - `format`: 'lrc' | 'cdg' - requested lyrics format
 
 ### Server → Client: `stream/start` lyrics object
 
 The `lyrics` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `lyrics`: object
-  - `channels`: object[] - configuration for each active lyrics channel, array index is the channel number
-    - `format`: 'lrc' | 'cdg' | 'none' - format of the lyrics data
+  - `format`: 'lrc' | 'cdg' - format of the lyrics data
 
 ### Server → Client: Lyrics (Binary)
 
 Binary messages should be rejected if there is no active stream.
 
-- Byte 0: message type `12`-`13` (uint8) - corresponds to lyrics channel 0-1 respectively
+- Byte 0: message type `12` (uint8)
 - Rest of bytes: lyrics data (UTF-8 encoded text for `lrc`; binary data for `cdg`)
-
-The message type determines which lyrics channel this data is for:
-- Type `12`: Channel 0 (Lyrics role, slot 0)
-- Type `13`: Channel 1 (Lyrics role, slot 1)
 
 The server sends lyrics data at the start of each track and resends after a track change. Clients begin processing the lyrics data immediately upon receipt.
 
-**Clearing lyrics:** To indicate that no lyrics are available for the current track on a specific channel, the server sends an empty binary message (only the message type byte, with no lyrics data) for that channel.
+When no lyrics are available for the current track (or lyrics exceed the client's `max_size_bytes`), the server sends [`stream/end`](#server--client-streamend) for the lyrics role. When lyrics become available again (e.g., on the next track), the server sends a new [`stream/start`](#server--client-streamstart) followed by the binary lyrics data.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
