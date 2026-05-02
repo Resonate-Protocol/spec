@@ -408,7 +408,7 @@ Response: [`stream/start`](#server--client-streamstart) for the requested role(s
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty, and should not be sent during track changes or seeks.
 
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
