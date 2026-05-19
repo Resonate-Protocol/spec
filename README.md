@@ -231,6 +231,10 @@ sequenceDiagram
         Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
+    alt Track jump (skip to different track)
+        Server->>Client: stream/clear (roles: [player, visualizer])
+    end
+
     alt Controller role
         Client->>Server: client/command (controller: play/pause/volume/switch/etc)
     end
@@ -377,7 +381,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally — the default behavior is to not clear unless the implementation requires it. Implementations may document their specific behavior.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
@@ -387,7 +391,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 ### Server → Client: `stream/clear`
 
-Instructs clients to clear buffers without ending the stream. Used for seek operations.
+Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
@@ -408,7 +412,13 @@ Response: [`stream/start`](#server--client-streamstart) for the requested role(s
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty, and should not be sent during track changes or seeks.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty. Specifically:
+
+- **Track transitions** (a track ends and the next begins naturally): no stream commands should be sent. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
+- **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
+- **Track jumps** (skipping to a different track): treat identically to a seek — send `stream/clear` instead of `stream/end`. Conceptually, the entire queue is a single continuous stream.
+
+Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
