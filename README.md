@@ -20,7 +20,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 - **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PIN** - an 8-decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed value, the dynamic-PIN method uses a per-session generated value.
-- **Sendspin Trust Level** - one of `owner`, `user`, or `none`, expressing the trust the client extends to the server. Ordered `none < user < owner`. `owner` and `user` are recorded client-side per pairing record; `none` is not stored but is the effective trust level on any connection where no pairing record exists for the peer. Servers with `owner` trust may issue [management commands](#management) to the client; servers with `user` trust are restricted to normal playback and control flows; and servers with `none` trust are further restricted to just conducting the pairing exchange.
+- **Sendspin Trust Level** - one of `owner`, `user`, or `none`, expressing the trust the client extends to the server. Ordered `none < user < owner`. `owner` and `user` are recorded client-side per pairing record; `none` is not stored but is the effective trust level on any connection where no pairing record exists for the peer. Servers with `owner` trust may issue [management commands](#management) to the client; servers with `user` trust are restricted to normal playback and control flows; and servers with `none` trust are further restricted to conducting a pairing exchange or, when [unpaired playback](#unpaired-playback) is enabled, normal playback and control flows.
 
 ## Role Versioning
 
@@ -410,7 +410,7 @@ Players that can output audio should have the role `player`.
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
-- `trust_level`: 'owner' | 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which management operations the server may issue. `'owner'` and `'user'` reflect the value recorded on the client's pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes, where no record exists yet
+- `trust_level`: 'owner' | 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which management operations the server may issue. `'owner'` and `'user'` reflect the value recorded on the client's pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired playback](#unpaired-playback), where no record exists for this server
 - `has_owner`: boolean - whether the client has an owner server recorded. When `false`, the connected server may claim ownership via [`server/claim-ownership`](#server--client-serverclaim-ownership)
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
@@ -423,6 +423,8 @@ Players that can output audio should have the role `player`.
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor).
+- `unpaired_playback`: object - whether this client currently admits [unpaired playback](#unpaired-playback)
+  - `enabled`: boolean
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
@@ -447,14 +449,17 @@ The combinations of `connection_reason` and `selected_pair_method` the server ma
 |---|---|---|
 | [Sendspin PSK](#definitions) | `'discovery'`, `'pairing'`, `'playback'`, `'management'` | `'dynamic_pin'` |
 | [Sendspin Pairing PSK](#definitions) | `'discovery'`, `'pairing'` | `'pairing_psk'` |
-| [Sentinel PSK](#pre-shared-key) | `'discovery'`, `'pairing'` | `'dynamic_pin'` or `'static_pin'` |
+| [Sentinel PSK](#pre-shared-key) | `'discovery'`, `'pairing'`, `'playback'`¹ | `'dynamic_pin'` or `'static_pin'` |
+
+¹ `'playback'` on the Sentinel PSK is only allowed when the client has [unpaired playback](#unpaired-playback) enabled.
 
 `selected_pair_method` must additionally match the `method` field of one of the [pair-method descriptors](#client--server-clienthello-pair-method-descriptor) the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
 Enforcement on the client side:
 
 - If `connection_reason` is `'pairing'` and `selected_pair_method` is not in the allowed set for the matched PSK, or names a method the client did not list - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
-- If `connection_reason` is `'playback'` or `'management'` but the matched PSK is a Pairing PSK or the Sentinel PSK (i.e., the connection is not authenticated by a long-term Sendspin PSK) - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `connection_reason` is `'management'` but the matched PSK is a Pairing PSK or the Sentinel PSK, or `connection_reason` is `'playback'` but the matched PSK is a Pairing PSK - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `connection_reason` is `'playback'` and the matched PSK is the Sentinel PSK but the client does not have [unpaired playback](#unpaired-playback) enabled - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 
 **Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
@@ -599,12 +604,13 @@ Sent by the client before gracefully closing the connection. This allows the cli
 
 Upon receiving this message, the server should initiate the disconnect.
 
-- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'concurrent_attempt' | 'unpaired'
+- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different Sendspin server. Server should not auto-reconnect but should show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
   - `unauthorized` - the client refused the connection because the server requested a `connection_reason` it is not authorized for (e.g., `'management'` without `'owner'` [trust level](#definitions)). Server should not auto-reconnect for this `connection_reason`
+  - `pairing_required` - the client refused an [unpaired playback](#unpaired-playback) connection because it does not have unpaired playback enabled. Server should not auto-reconnect without first pairing
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., a `'management'` session, or a pairing handshake when the incoming reason is also a pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
@@ -629,6 +635,12 @@ This specification defines three pairing methods. Servers must implement all thr
 Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. All pairing handshakes displace any active playback for their duration; see [Multiple servers](#multiple-servers).
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
+
+### Unpaired Playback
+
+A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. The default is the manufacturer's choice; clients that support the [`controller`](#controller-messages) role SHOULD default to disabled. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback; the server's setting is not exchanged on the wire.
+
+**Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and the peer's static key is learned from mDNS, which is unauthenticated; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
 ### Pairing PSK Flow
 
@@ -972,6 +984,8 @@ On success, `data` is shaped as:
 - `dynamic_pin?`: object
   - `enabled`: boolean
   - `record_mode`: object - see [Record mode](#record-mode)
+- `unpaired_playback`: object - see [Unpaired Playback](#unpaired-playback)
+  - `enabled`: boolean
 
 A PIN-method object is absent if the client does not implement that method.
 
@@ -992,6 +1006,8 @@ Modify per-method pairing config.
 - `dynamic_pin?`: object
   - `enabled?`: boolean
   - `record_mode?`: object - see [Record mode](#record-mode)
+- `unpaired_playback?`: object - see [Unpaired Playback](#unpaired-playback)
+  - `enabled?`: boolean
 
 The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Setting fields on a method the client does not implement returns `invalid`.
 
