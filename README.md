@@ -885,6 +885,8 @@ All `management/*` requests are answered by a single [`management/result`](#clie
 
 A paired server MAY elevate its record to `owner` by sending [`server/claim-ownership`](#server--client-serverclaim-ownership) on a non-management connection while the current [`client/hello`](#client--server-clienthello) reports `has_owner: false`.
 
+A server MUST prompt the user for consent before sending [`server/claim-ownership`](#server--client-serverclaim-ownership), and is encouraged to defer the claim until the user invokes an action that requires `owner` trust. A server holding `owner` trust MUST expose user-accessible controls to demote its own record to `user` and to promote another paired record to `owner` (both via [`management/update-record`](#server--client-managementupdate-record)).
+
 The client MUST set `has_owner: false` when the last record at `trust_level: 'owner'` loses that trust by any of:
 - [`server/unpair`](#server--client-serverunpair) issued by that `owner`-trust server,
 - [`management/remove-record`](#server--client-managementremove-record) targeting that record,
