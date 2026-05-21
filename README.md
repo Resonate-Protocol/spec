@@ -269,6 +269,7 @@ Players that can output audio should have the role `player`.
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
+  - `mac_address?`: string - MAC address of the network interface the connection is opened on, in lowercase colon-separated form (e.g., `aa:bb:cc:dd:ee:ff`)
 - `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
