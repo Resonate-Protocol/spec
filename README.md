@@ -812,7 +812,7 @@ The following rules are mandatory for clients implementing `static_pin` or `dyna
 - **Per-method failure counter.** The client maintains a failure counter for each PIN-pairing method family (`static_pin` and `dynamic_pin` tracked independently). The counter is persisted across reboots. It is not partitioned by `server_id` or source IP: a single per-method counter for the device.
 - **Increment.** The counter for a method increments on each inner-authentication failure observed in that method's flow.
 - **Reset.** The counter for a method resets to zero on a successful pairing finalization for that method.
-- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or [`management/clear-pin-lockout`](#server--client-managementclear-pin-lockout) issued by an `owner`-trust server; on successful exit the counter resets to zero. The client SHOULD surface the lockout to the operator via a device-local mechanism (LED, on-screen indicator, audible cue). If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
+- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from an `owner`-trust server; on successful exit the counter resets to zero. The client SHOULD surface the lockout to the operator via a device-local mechanism (LED, on-screen indicator, audible cue). If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
 - **Device-presence verification.** Its failures do not increment any counter, and its handshakes proceed regardless of dynamic-PIN lockout state. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
 
 ### Client → Server: `client/hello` pair-method descriptor
@@ -928,14 +928,6 @@ Response to [`server/claim-ownership`](#server--client-serverclaim-ownership).
   - `ok` - the requesting server is now the client's owner. The client records this server's `server_id` as owner and reports `has_owner: true` to all subsequent connections
   - `already_owned` - the client already had an owner when the request was processed (e.g., the server connected with a stale `has_owner: false`, or `has_owner` flipped between [`client/hello`](#client--server-clienthello) and the claim)
 
-### Server → Client: `management/set-name`
-
-Change the client's friendly `name` (the value reported in subsequent [`client/hello`](#client--server-clienthello) connections and via mDNS).
-
-- `name`: string - new friendly name; non-empty, length cap 128 UTF-8 bytes
-
-Possible outcomes: `ok`, `permission_denied`, `invalid`.
-
 ### Records
 
 Read, create, modify, and remove the pairing records stored by the client. Each record holds a [Sendspin PSK](#definitions) and a [trust level](#definitions). Records come in two kinds:
@@ -1002,18 +994,21 @@ On success, `data` is shaped as:
 
 - `pairing_psk`: object
   - `enabled`: boolean
+  - `record_mode`: object - see [Record mode](#record-mode)
 - `static_pin?`: object
   - `enabled`: boolean
+  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
   - `record_mode`: object - see [Record mode](#record-mode)
 - `dynamic_pin?`: object
   - `enabled`: boolean
+  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
   - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_playback`: object - see [Unpaired Playback](#unpaired-playback)
   - `enabled`: boolean
 
 A PIN-method object is absent if the client does not implement that method.
 
-The configured static PIN value is not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate it.
+Configured secrets (the Pairing PSK and the static PIN) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
 
 Possible outcomes: `ok`, `permission_denied`.
 
@@ -1023,69 +1018,27 @@ Modify per-method pairing config.
 
 - `pairing_psk?`: object
   - `enabled?`: boolean
+  - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured Pairing PSK
+  - `record_mode?`: object - see [Record mode](#record-mode)
 - `static_pin?`: object
   - `enabled?`: boolean
   - `pin?`: string - 8 decimal digits; replaces the configured static PIN
   - `record_mode?`: object - see [Record mode](#record-mode)
+  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
 - `dynamic_pin?`: object
   - `enabled?`: boolean
   - `record_mode?`: object - see [Record mode](#record-mode)
+  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
 - `unpaired_playback?`: object - see [Unpaired Playback](#unpaired-playback)
   - `enabled?`: boolean
 
 The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Setting fields on a method the client does not implement returns `invalid`.
 
-Possible outcomes: `ok`, `permission_denied`, `invalid`.
-
-#### Server → Client: `management/clear-pin-lockout`
-
-Clear the failure counters for both PIN-pairing methods, exiting any [terminal lockout](#pin-pairing-lockout) state. No payload fields.
-
-Possible outcomes: `ok`, `permission_denied`.
-
-#### Server → Client: `management/list-pairing-psks`
-
-Read the set of [Sendspin Pairing PSKs](#definitions) the client accepts. No payload fields.
-
-On success, `data` is shaped as:
-
-- `psks`: object[] - per-PSK entries:
-  - `psk_id`: string
-  - `record_mode`: object - see [Record mode](#record-mode)
-
-The raw PSK bytes are never returned; entries are identified only by `psk_id`.
-
-Possible outcomes: `ok`, `permission_denied`.
-
-#### Server → Client: `management/add-pairing-psk`
-
-Add a new Pairing PSK to the accepted set.
-
-- `psk`: string - 43-character base64url-encoded 32-byte PSK (no padding)
-- `record_mode`: object - see [Record mode](#record-mode)
-
-Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
-
-#### Server → Client: `management/update-pairing-psk`
-
-Modify the `record_mode` of an existing Pairing PSK entry.
-
-- `psk_id`: string
-- `record_mode`: object - see [Record mode](#record-mode)
-
-Possible outcomes: `ok`, `permission_denied`, `invalid`, `not_found`.
-
-#### Server → Client: `management/remove-pairing-psk`
-
-Remove a Pairing PSK from the accepted set.
-
-- `psk_id`: string
-
-Possible outcomes: `ok`, `permission_denied`, `not_found`.
+Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`,  `storage_exhausted`.
 
 #### Record mode
 
-When a server completes pairing via any method, the resulting record is created according to that method's `record_mode`. For the pairing-PSK method, the `record_mode` is per-PSK - the one attached to the specific Pairing PSK that matched. For the PIN methods, the `record_mode` is per-method.
+When a server completes pairing via any method, the resulting record is created according to that method's `record_mode`, configured via [`management/set-pairing-config`](#server--client-managementset-pairing-config).
 
 `record_mode` is an object: `{ kind, psk_id? }`.
 
@@ -1103,10 +1056,10 @@ Response to a `management/*` request. The at-most-one-in-flight rule (see [Manag
 - `result`: string - result code. See each request's outcomes line for the subset that applies.
   - `ok` - operation completed and any state change has been persisted
   - `permission_denied` - the request was issued outside a valid management session
-  - `already_exists` - a record or PSK entry with this `psk_id` already exists on the client
+  - `already_exists` - the request conflicts with an existing entry on the client
   - `invalid` - the request payload is malformed, contains an out-of-range value, omits a field required for the chosen operation, or violates a referential constraint
   - `not_found` - the request targets an identifier (e.g., `psk_id`) that does not exist on the client
-  - `storage_exhausted` - the client cannot persist a new record or PSK entry due to full storage
+  - `storage_exhausted` - the client cannot persist the change due to full storage
 - `data?`: object - operation-specific response payload. Present only when the in-flight request defines one and `result` is `ok`; see each request for the shape.
 
 ## Player messages
