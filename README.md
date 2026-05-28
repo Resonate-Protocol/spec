@@ -66,19 +66,22 @@ The server discovers available clients through mDNS and connects to each client 
 
 #### Multiple servers
 
-A client holds at most one connection at a time. Connection types, classified by [`connection_reason`](#server--client-serverhello):
+A client holds at most one admitted connection at a time, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
 
-- **management** - `'management'`
-- **pairing** - `'pairing'`
-- **playback** - `'playback'`
-- **discovery** - `'discovery'`
+- `'management'`
+- `'playback'`
+- `'pairing'`
 
-Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
+A connection with empty `activities` ranks lowest.
 
-When a new server connects, the client must complete the handshake (send [`client/hello`](#client--server-clienthello), receive [`server/hello`](#server--client-serverhello)) before applying admission. Types are ordered above by priority (management highest, discovery lowest). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
+Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last-played server").
 
-- An in-flight **pairing** is not displaced by another incoming **pairing**.
-- An incoming **discovery**, when an existing **discovery** is held, is admitted if its `server_id` matches the last-played server (and the existing one's does not); otherwise the existing is kept.
+When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
+
+- An in-flight pairing is not displaced by an incoming `'playback'` or `'pairing'` connection.
+- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-played server (and the existing one's does not); otherwise the existing is kept.
+
+Subsequent `server/activate` updates do not trigger arbitration. A provisional connection that has not sent `server/activate` within 30 seconds is dropped.
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
@@ -145,7 +148,7 @@ psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 
 The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, Pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
-The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., for PIN pairing methods and for discovery before any pairing record is established. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
+The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
 
 ```
 Sentinel PSK = SHA-256("sendspin-sentinel-psk-v1")
@@ -174,6 +177,12 @@ The prologue mixed into the Noise handshake state on both sides is the concatena
 
 Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket silently. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
+### Re-handshake
+
+The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust class after a successful [pairing](#pairing), to switch from Sentinel to a Pairing PSK, or to rotate session keys on long-running connections.
+
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) (the client re-asserts `trust_level`) → [`server/activate`](#server--client-serveractivate).
+
 ## Communication
 
 Once the WebSocket connection is established, Client and Server perform an initial handshake before exchanging application data:
@@ -183,10 +192,11 @@ Once the WebSocket connection is established, Client and Server perform an initi
 3. Server → Client: [`noise/handshake`](#client--server-noisehandshake) - Noise message 1 (cleartext)
 4. Client → Server: [`noise/handshake`](#client--server-noisehandshake) - Noise message 2 (cleartext)
 5. Both sides switch to Noise transport mode. From this point, all WebSocket frames are binary, and all payloads are Noise transport ciphertexts.
-6. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
-7. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
+6. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
+7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
+8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
-Before the inner [`client/hello`](#client--server-clienthello) / [`server/hello`](#server--client-serverhello) exchange completes, no other messages should be sent. See [Encryption](#encryption) for cryptographic details.
+No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives. See [Encryption](#encryption) for cryptographic details.
 
 Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are sent as WebSocket **text** frames containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** frames carrying Noise transport ciphertexts.
 
@@ -299,8 +309,9 @@ sequenceDiagram
 
     Note over Client,Server: Noise handshake complete (see Communication)
 
+    Server->>Client: server/hello (name)
     Client->>Server: client/hello (roles and capabilities)
-    Server->>Client: server/hello (server info, connection_reason)
+    Server->>Client: server/activate (activities, active_roles)
 
     Client->>Server: client/state (state: synchronized)
     alt Player role
@@ -398,10 +409,19 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
 
 After both handshake messages have been exchanged, both sides switch to Noise transport mode. All subsequent WebSocket frames are binary, and all payloads are Noise transport ciphertexts.
 
+The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as binary frames encrypted under the current transport keys rather than as cleartext text frames.
+
+### Server → Client: `server/hello`
+
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`). This message will be followed by a [`client/hello`](#client--server-clienthello) message from the client.
+
+- `name`: string - friendly name of the server
+- `unpaired_playback`: object - whether this server is configured to initiate [unpaired playback](#unpaired-playback)
+  - `enabled`: boolean
+
 ### Client → Server: `client/hello`
 
-First message sent by the client after the [Noise handshake](#encryption) completes. Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
-This message will be followed by a [`server/hello`](#server--client-serverhello) message from the server.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
 
 Players that can output audio should have the role `player`.
 
@@ -428,38 +448,33 @@ Players that can output audio should have the role `player`.
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
-### Server → Client: `server/hello`
+### Server → Client: `server/activate`
 
-Response to the [`client/hello`](#client--server-clienthello) message with information about the server. Sent as an encrypted message (binary frame, message type `0`).
+Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
 
-Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
+Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
 
-- `name`: string - friendly name of the server
-- `connection_reason?`: 'discovery' | 'pairing' | 'playback' | 'management' - only used for [server-initiated connections](#multiple-servers).
-  - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
-  - `pairing` - server is performing a [pairing](#pairing) handshake
-  - `playback` - server needs client for active or upcoming playback
-  - `management` - server is opening a dedicated [management](#management) session - see that section for preconditions and constraints
-- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required when `connection_reason` is `'playback'`; absent otherwise.
-- `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `connection_reason` is `'pairing'`; absent otherwise.
+- `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
+- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on connections capable of playback; absent otherwise. Persists across subsequent `server/activate` messages that omit it.
+- `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise.
 
-The combinations of `connection_reason` and `selected_pair_method` the server may legitimately pick are constrained by which PSK matched during the [Noise handshake](#encryption):
+The combinations of activity sets and `selected_pair_method` the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
 
-| PSK matched | Allowed `connection_reason` | Allowed `selected_pair_method` (for `'pairing'`) |
+| PSK matched | Allowed activity sets | Allowed `selected_pair_method` (for `'pairing'`) |
 |---|---|---|
-| [Sendspin PSK](#definitions) | `'discovery'`, `'pairing'`, `'playback'`, `'management'` | `'dynamic_pin'` |
-| [Sendspin Pairing PSK](#definitions) | `'discovery'`, `'pairing'` | `'pairing_psk'` |
-| [Sentinel PSK](#pre-shared-key) | `'discovery'`, `'pairing'`, `'playback'`¹ | `'dynamic_pin'` or `'static_pin'` |
+| [Sendspin PSK](#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` | `'dynamic_pin'` |
+| [Sendspin Pairing PSK](#definitions) | `['pairing']` | `'pairing_psk'` |
+| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ | `'dynamic_pin'` or `'static_pin'` |
 
-¹ `'playback'` on the Sentinel PSK is only allowed when the client has [unpaired playback](#unpaired-playback) enabled.
+¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired playback](#unpaired-playback) enabled.
 
 `selected_pair_method` must additionally match the `method` field of one of the [pair-method descriptors](#client--server-clienthello-pair-method-descriptor) the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
 Enforcement on the client side:
 
-- If `connection_reason` is `'pairing'` and `selected_pair_method` is not in the allowed set for the matched PSK, or names a method the client did not list - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
-- If `connection_reason` is `'management'` but the matched PSK is a Pairing PSK or the Sentinel PSK, or `connection_reason` is `'playback'` but the matched PSK is a Pairing PSK - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
-- If `connection_reason` is `'playback'` and the matched PSK is the Sentinel PSK but the client does not have [unpaired playback](#unpaired-playback) enabled - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If `'pairing'` is in activities and `selected_pair_method` is not in the allowed set for the matched PSK, or names a method the client did not list - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
+- If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK or the recorded `trust_level` for the server is not `'owner'` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `activities` contains `'playback'` on the Sentinel PSK but the client does not have [unpaired playback](#unpaired-playback) enabled - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 
 **Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
@@ -590,7 +605,7 @@ Contains delta updates with only the changed fields. The client should merge the
 
 ### Server → Client: `server/unpair`
 
-Sent by a paired server to drop its own pairing record from the client. Valid at any time on any `connection_reason`; does not require a [management session](#management). No payload fields.
+Sent by a paired server to drop its own pairing record from the client. Valid at any time regardless of the current `activities`; does not require `'management'` in the activity set. No payload fields.
 
 Client behavior:
 
@@ -609,20 +624,20 @@ Upon receiving this message, the server should initiate the disconnect.
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
-  - `unauthorized` - the client refused the connection because the server requested a `connection_reason` it is not authorized for (e.g., `'management'` without `'owner'` [trust level](#definitions)). Server should not auto-reconnect for this `connection_reason`
+  - `unauthorized` - the client refused the connection because the server declared an activity set it is not authorized for (e.g., `'management'` without `'owner'` [trust level](#definitions)). Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired playback](#unpaired-playback) connection because it does not have unpaired playback enabled. Server should not auto-reconnect without first pairing
-  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., a `'management'` session, or a pairing handshake when the incoming reason is also a pairing). Server may retry later
+  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
 **Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
 
-- On a `'playback'` or `'discovery'` connection, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
-- On a `'pairing'` or `'management'` connection, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
+- On a connection whose `activities` are empty, or include `'playback'`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
+- Otherwise, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
 - Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops when a long-term PSK has become invalid (e.g., after a client factory reset).
 
 ## Pairing
 
-Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)).
+Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered `long_term_psk`, bringing the channel under the new trust ceiling without closing the WebSocket.
 
 This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement either or both PIN methods.
 
@@ -632,13 +647,13 @@ This specification defines three pairing methods. Servers must implement all thr
 2. **Dynamic PIN** - pairing with a per-session [Sendspin Pairing PIN](#definitions); the client derives the PIN from a commit-and-reveal binding to the Noise handshake and emits it via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
 3. **Static PIN** - pairing with a fixed [Sendspin Pairing PIN](#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the PIN is disclosed. See [Static PIN Pairing Flow](#static-pin-pairing-flow).
 
-Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. All pairing handshakes displace any active playback for their duration; see [Multiple servers](#multiple-servers).
+Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers)); the operator must stop playback before initiating pairing.
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
 
 ### Unpaired Playback
 
-A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. The default is the manufacturer's choice; clients that support the [`controller`](#controller-messages) role SHOULD default to disabled. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback; the server's setting is not exchanged on the wire.
+A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. The default is the manufacturer's choice; clients that support the [`controller`](#controller-messages) role SHOULD default to disabled. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback, with the current setting advertised in [`server/hello`](#server--client-serverhello).
 
 **Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and the peer's static key is learned from mDNS, which is unauthenticated; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
@@ -653,12 +668,15 @@ sequenceDiagram
 
     Note over Client,Server: Noise handshake completes with Pairing PSK
 
+    Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
-    Server->>Client: server/hello (connection_reason=pairing, selected_pair_method=pairing_psk)
+    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=pairing_psk)
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Connection closes.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
 ```
+
+If a Sentinel-keyed connection is already open when the operator picks `pairing_psk`, the server first [re-handshakes](#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
 
 ### Dynamic PIN Pairing Flow
 
@@ -669,10 +687,12 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes
+    Note over Client,Server: Noise handshake completes with Sentinel PSK
 
+    Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
-    Server->>Client: server/hello (connection_reason=pairing, selected_pair_method=dynamic_pin)
+    Note over Server: Operator picks dynamic PIN
+    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=dynamic_pin)
     Client->>Server: client/pair-init (commit_B)
     Server->>Client: server/pair-init (nonce_A)
     Note over Client: Derive PIN from (h, nonce_B, nonce_A), emit via out-channel
@@ -686,7 +706,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Connection closes.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
 ```
 
 **Binding values.** The dynamic PIN flow introduces three values across two messages that bind the PIN to the underlying Noise handshake:
@@ -717,7 +737,7 @@ All three checks must pass before the server processes [`client/pair-finalize`](
 
 **Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
 
-**Device-presence verification.** When the matched PSK is a long-term [Sendspin PSK](#definitions), the dynamic-PIN sequence runs through the PAKE round and commitment reveal, but the two `pair-finalize` messages are omitted: no new long-term PSK is established. A failed check has no effect on the existing pairing record and does not increment the PIN-pairing [failure counter](#pin-pairing-lockout). After verifying [`client/pair-confirm`](#client--server-clientpair-confirm), the server closes the connection. The purpose is to confirm that the device holding the long-term PSK is the same physical device the operator is currently observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
+**Device-presence verification.** When the matched PSK is a long-term [Sendspin PSK](#definitions), the dynamic-PIN sequence runs through the PAKE round and commitment reveal, but the two `pair-finalize` messages are omitted: no new long-term PSK is established. A failed check has no effect on the existing pairing record and does not increment the PIN-pairing [failure counter](#pin-pairing-lockout). After verifying [`client/pair-confirm`](#client--server-clientpair-confirm), the server sends a fresh [`server/activate`](#server--client-serveractivate) to resume the prior state. The purpose is to confirm that the device holding the long-term PSK is the same physical device the operator is currently observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
 
 ### Static PIN Pairing Flow
 
@@ -728,10 +748,12 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes
+    Note over Client,Server: Noise handshake completes (Sentinel PSK)
 
+    Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
-    Server->>Client: server/hello (connection_reason=pairing, selected_pair_method=static_pin)
+    Note over Server: Operator picks static PIN
+    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=static_pin)
     Note over Client: Wait for operator to open pairing window
     Client->>Server: client/pair-init
     Note over Server: Operator enters static PIN
@@ -744,7 +766,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Connection closes.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
@@ -759,7 +781,7 @@ Static PIN pairing gates each attempt on a **pairing window**: a state in which 
 
 - **Opening the window.** An operator gesture on the client opens the window: a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action.
 - **Window lifetime.** From window opening until [`client/pair-init`](#client--server-clientpair-init) is sent. Recommended 5 minutes. On expiry, the window closes silently. A subsequent attempt requires a fresh gesture.
-- **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and [`server/hello`](#server--client-serverhello) has arrived. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
+- **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
 
 ### PAKE
 
@@ -807,7 +829,7 @@ The pairing messages below are listed in the order they appear in the dynamic PI
 
 #### Client → Server: `client/pair-init`
 
-Signals that the client is ready to proceed with the PIN-pairing flow. In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/hello`](#server--client-serverhello). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
+Signals that the client is ready to proceed with the PIN-pairing flow. In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/activate`](#server--client-serveractivate). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
 
 - `commit_B?`: string - `SHA-256(nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
 
@@ -850,13 +872,13 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after [`server/hello`](#server--client-serverhello). Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
+Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate). Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
 
 - `long_term_psk`: string - 43-character base64url-encoded 32-byte PSK (no padding). See [Long-term PSK delivery](#long-term-psk-delivery)
 
 #### Server → Client: `server/pair-finalize`
 
-Acknowledges that the server has persisted the pairing record. After receiving this message, the client persists its own record and closes the connection. Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
+Acknowledges that the server has persisted the pairing record. After receiving this message, the client persists its own record. Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
 
 - payload: `{}`
 
@@ -868,7 +890,7 @@ Aborts a pairing attempt. The sender closes the connection after sending.
   - `attempt_timeout` (client) - the pairing attempt did not complete within the attempt timeout after [`client/pair-init`](#client--server-clientpair-init) was sent; see [Pairing window](#pairing-window)
   - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
   - `locked_out` (client) - the client is in [terminal lockout](#pin-pairing-lockout) for the selected pairing method
-  - `method_not_supported` (client) - the server's combination of `connection_reason` and `selected_pair_method` is not permitted for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
+  - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
   - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the commitment opening or PIN binding check failed
   - `storage_exhausted` (client) - client cannot persist a new pairing record and has no fallback policy
   - `user_cancelled` (client) - operator aborted the pairing through a local UI
@@ -877,13 +899,13 @@ Aborts a pairing attempt. The sender closes the connection after sending.
 
 This section covers ownership establishment and the management commands an `owner`-trust server may issue.
 
-Management commands are scoped to a **management session**: a connection whose [`connection_reason`](#server--client-serverhello) is `'management'`. The client validates at connection setup that the recorded `trust_level` for the server is `'owner'`; if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. A management session carries no streams; servers MUST NOT send `stream/*` messages on it, and clients SHOULD ignore them if received. If a `management/*` message arrives on a non-management connection, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
+Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the recorded `trust_level` for the server is `'owner'`; if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
 
 All `management/*` requests are answered by a single [`management/result`](#client--server-managementresult) message. At most one management request may be in flight per connection; in-order WebSocket delivery makes the reply unambiguous.
 
 ### Ownership Claim
 
-A paired server MAY elevate its record to `owner` by sending [`server/claim-ownership`](#server--client-serverclaim-ownership) on a non-management connection while the current [`client/hello`](#client--server-clienthello) reports `has_owner: false`.
+A paired server MAY elevate its record to `owner` by sending [`server/claim-ownership`](#server--client-serverclaim-ownership) while `'management'` is not in activities and the current [`client/hello`](#client--server-clienthello) reports `has_owner: false`.
 
 A server MUST prompt the user for consent before sending [`server/claim-ownership`](#server--client-serverclaim-ownership), and is encouraged to defer the claim until the user invokes an action that requires `owner` trust. A server holding `owner` trust MUST expose user-accessible controls to demote its own record to `user` and to promote another paired record to `owner` (both via [`management/update-record`](#server--client-managementupdate-record)).
 
