@@ -78,7 +78,7 @@ Clients must persistently store the `server_id` of the server that most recently
 When a new server connects, the client must complete the handshake (send [`client/hello`](#client--server-clienthello), receive [`server/hello`](#server--client-serverhello)) before applying admission. Types are ordered above by priority (management highest, discovery lowest). The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
 
 - An in-flight **pairing** is not displaced by another incoming **pairing**.
-- An incoming **discovery**, when an existing **discovery** is held, is admitted iff its `server_id` matches the last-played server (and the existing one's does not); otherwise the existing is kept.
+- An incoming **discovery**, when an existing **discovery** is held, is admitted if its `server_id` matches the last-played server (and the existing one's does not); otherwise the existing is kept.
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
