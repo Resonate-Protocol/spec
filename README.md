@@ -34,7 +34,7 @@ All role names and versions not starting with `_` are reserved for future revisi
 
 Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
 
-The server activates one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list. The server reports activated roles in `active_roles`.
+The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
 
 Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
 
@@ -476,7 +476,7 @@ Enforcement on the client side:
 - If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK or the recorded `trust_level` for the server is not `'owner'` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `activities` contains `'playback'` on the Sentinel PSK but the client does not have [unpaired playback](#unpaired-playback) enabled - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 
-**Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
+**Note:** Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 ### Client → Server: `client/time`
 
@@ -653,7 +653,7 @@ Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dyn
 
 ### Unpaired Playback
 
-A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. The default is the manufacturer's choice; clients that support the [`controller`](#controller-messages) role SHOULD default to disabled. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback, with the current setting advertised in [`server/hello`](#server--client-serverhello).
+A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below - in particular, the [`controller`](#controller-messages) role lets the client issue commands that affect its entire group and is a reasonable candidate to omit on `'none'`-trust sessions. The default is the manufacturer's choice. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback, with the current setting advertised in [`server/hello`](#server--client-serverhello).
 
 **Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and the peer's static key is learned from mDNS, which is unauthenticated; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
