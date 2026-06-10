@@ -716,7 +716,7 @@ Each visualizer binary message carries exactly one frame. The server emits messa
 The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `visualizer@v1_support`: object
-  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'pitch', 'spectrum'
+  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'
   - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting each message's full wire size (message-type byte + timestamp + data)
   - `rate_max`: integer - maximum periodic visualization frames per second (applies to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo. Clients should set this to their display refresh rate
   - `spectrum?`: object - spectrum configuration, required if `types` includes 'spectrum'
@@ -767,7 +767,7 @@ Binary messages should be rejected if there is no active stream. Each visualizat
 
 `loudness`, `spectrum` bins, and the `f_peak` amplitude use the full `uint16` range 0-65535, where 0 = silence and 65535 = full scale. Values are A-weighted and dB-scaled: -60 dB → 0, 0 dB → 65535, mapped linearly across that range.
 
-Message types `22` and `23` are reserved for future visualizer types within the role's 16-23 allocation and must not be used by implementations.
+Message types `21`, `22`, and `23` are reserved for future visualizer types within the role's 16-23 allocation and must not be used by implementations.
 
 #### `loudness` — message type `16`
 
@@ -786,7 +786,7 @@ Musical beat event. Bit 0 is only meaningful when [`stream/start`](#server--clie
 - 2 bytes: `uint16` freq - dominant frequency in Hz (0 = no peak detected, amp must also be 0)
 - 2 bytes: `uint16` amp - amplitude (see scaling above)
 
-Tracks the dominant FFT bin. For pitched sources strong harmonics can dominate the fundamental, so `f_peak` is not a substitute for `pitch`.
+Tracks the dominant FFT bin, which is not always the fundamental: strong harmonics can dominate, so do not treat `f_peak` as the musical note being played.
 
 #### `spectrum` — message type `19`
 
@@ -799,13 +799,6 @@ Magnitude per display bin. Servers may impose an implementation-defined upper bo
 - 1 byte: `uint8` strength
 
 Energy onset event. Fires on any transient (drum hits, cymbal crashes, attacks), independent of musical timing. `strength` 0-255 lets clients scale flash intensity.
-
-#### `pitch` — message type `21`
-
-- 2 bytes: `uint16` midi (8.8 fixed-point) - fractional MIDI note (integer part = MIDI note number, e.g. 69 = A4; fractional part = sub-semitone for vibrato/glissando)
-- 1 byte: `uint8` confidence - 0-255. Clients should ignore pitches below their own threshold
-
-Perceived pitch. Emitted periodically up to `rate_max`. Distinct from `f_peak`, which tracks the dominant FFT bin.
 
 ## Color messages
 This section describes messages specific to clients with the `color` role, which receive colors derived from the current audio. Colors may be extracted from album artwork, provided by the music source, or manually programmed by the server.
