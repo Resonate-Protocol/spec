@@ -746,7 +746,6 @@ The `visualizer` object in [`stream/request-format`](#client--server-streamreque
 - `visualizer`: object
   - `types?`: string[] - new set of visualization data types
   - `rate_max?`: integer - new periodic frames-per-second cap
-  - `buffer_capacity?`: integer - new buffer capacity in bytes
   - `spectrum?`: object - new spectrum configuration ([see spectrum object details](#client--server-clienthello-visualizerv1-support-object))
 
 All fields are optional; omitted fields keep their current value.
