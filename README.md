@@ -137,7 +137,7 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
+WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
