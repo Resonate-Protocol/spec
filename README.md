@@ -135,7 +135,7 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type.
+WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
@@ -217,7 +217,7 @@ sequenceDiagram
             Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
         alt Visualizer role
-            Server->>Client: binary Type 16 (visualization data)
+            Server->>Client: binary Types 16-20 (loudness, beat, f_peak, spectrum, peak)
         end
     end
 
@@ -395,10 +395,11 @@ Instructs clients to clear buffers without ending the stream. Used for seek oper
 
 ### Client → Server: `stream/request-format`
 
-Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
+Request different stream format (upgrade or downgrade). Available for clients with the `player`, `artwork`, or `visualizer` role.
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+- `visualizer?`: object - only for clients with the `visualizer` role ([see visualizer object details](#client--server-streamrequest-format-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -719,22 +720,52 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
 ## Visualizer messages
-This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
+This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
+
+Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven and not throttled by `rate_max`; all other types are periodic.
+
+**`beat` vs `peak`:** `beat` is a musical pulse derived from tempo/beat tracking, landing on the rhythmic grid with downbeats marking bar starts. Accurate beat detection often relies on offline analysis (e.g. neural beat trackers); servers without such analysis omit the type. `peak` is an energy onset detected live from the audio stream and fires on any transient (drum hits, cymbal crashes, attacks), independent of the rhythmic grid. A `beat` and a `peak` can fire on the same hit, or a `peak` can fire mid-bar with no `beat`.
 
 ### Client → Server: `client/hello` visualizer@v1 support object
 
 The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `visualizer@v1_support`: object
-  - Desired FFT details (to be determined)
-  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer that are yet to be displayed
+  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'
+  - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting each message's full wire size (message-type byte + timestamp + data)
+  - `rate_max`: integer - maximum periodic visualization frames per second (applies to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo. Clients should set this to their display refresh rate
+  - `spectrum?`: object - spectrum configuration, required if `types` includes 'spectrum'
+    - `n_disp_bins`: integer - number of display bins (i.e. bars on a graphical equalizer)
+    - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins. 'mel' uses the HTK mel formula (`m = 2595 * log10(1 + f/700)`), 'log' uses base-10 logarithm of frequency, 'lin' uses linear frequency spacing
+    - `f_min`: integer - lowest frequency in Hz to bin
+    - `f_max`: integer - highest frequency in Hz to bin
 
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `visualizer`: object
-  - FFT details (to be determined)
+  - `types`: string[] - visualization data types the server will stream
+  - `rate_max`: integer - periodic frames per second the server will emit
+  - `tracks_downbeats`: boolean - only if `types` includes 'beat'. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
+  - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'
+    - `n_disp_bins`: integer - number of display bins
+    - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
+    - `f_min`: integer - lowest frequency in Hz
+    - `f_max`: integer - highest frequency in Hz
+
+### Client → Server: `stream/request-format` visualizer object
+
+The `visualizer` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+- `visualizer`: object
+  - `types?`: string[] - new set of visualization data types
+  - `rate_max?`: integer - new periodic frames-per-second cap
+  - `spectrum?`: object - new spectrum configuration ([see spectrum object details](#client--server-clienthello-visualizerv1-support-object))
+
+All fields are optional; omitted fields keep their current value.
+
+Response: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
 
 ### Server → Client: `stream/clear` visualizer
 
@@ -742,13 +773,46 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages should be rejected if there is no active stream. Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
-- Byte 0: message type `16` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device
-- Rest of bytes: visualization data
+- Byte 0: message type (uint8, one of the types listed below)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
+- Remaining bytes: data, layout per type below
 
-The timestamp indicates when this visualization data should be displayed, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+`loudness`, `spectrum` bins, and the `f_peak` amplitude use the full `uint16` range 0-65535, where 0 = silence and 65535 = full scale. Values are A-weighted and dB-scaled: -60 dB → 0, 0 dB → 65535, mapped linearly across that range.
+
+Message types `21`, `22`, and `23` are reserved for future visualizer types within the role's 16-23 allocation and must not be used by implementations.
+
+#### `loudness` — message type `16`
+
+- 2 bytes: `uint16` value
+
+Overall A-weighted loudness in dB (see scaling above).
+
+#### `beat` — message type `17`
+
+- 1 byte: `uint8` flags. Bit 0 = downbeat (bar start). Bits 1-7 reserved, must be zero by the server, ignored by the client
+
+Musical beat event. Bit 0 is only meaningful when [`stream/start`](#server--client-streamstart-visualizer-object) sets `tracks_downbeats: true`; otherwise it is always 0.
+
+#### `f_peak` — message type `18`
+
+- 2 bytes: `uint16` freq - dominant frequency in Hz (0 = no peak detected, amp must also be 0)
+- 2 bytes: `uint16` amp - amplitude (see scaling above)
+
+Tracks the dominant FFT bin, which is not always the fundamental: strong harmonics can dominate, so do not treat `f_peak` as the musical note being played.
+
+#### `spectrum` — message type `19`
+
+- 2*n bytes: `uint16[n]` bins from low to high frequency. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object)
+
+Magnitude per display bin (see scaling above). Servers may impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
+
+#### `peak` — message type `20`
+
+- 1 byte: `uint8` strength
+
+Energy onset event. Fires on any transient (drum hits, cymbal crashes, attacks), independent of musical timing. `strength` 0-255 lets clients scale flash intensity.
 
 ## Color messages
 This section describes messages specific to clients with the `color` role, which receive colors derived from the current audio. Colors may be extracted from album artwork, provided by the music source, or manually programmed by the server.
