@@ -791,7 +791,7 @@ Tracks the dominant FFT bin, which is not always the fundamental: strong harmoni
 
 - 2*n bytes: `uint16[n]` bins from low to high frequency. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object)
 
-Magnitude per display bin. Servers may impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
+Magnitude per display bin (see scaling above). Servers may impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
 
 #### `peak` — message type `20`
 
