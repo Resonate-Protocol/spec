@@ -172,7 +172,8 @@ Each [`server/time`](#server--client-servertime) response provides the four time
 
 - Each client is responsible for maintaining synchronization with the server's timestamps
 - Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
+- On connect a client reports `state: 'not_synchronized'` via [`client/state`](#client--server-clientstate), then `state: 'synchronized'` once clock synchronization is established. The server MUST NOT send binary messages to a client unless it is in the `synchronized` state
+- A buffer underrun does not change `state`; the client SHOULD mute output and continue buffering until it can resume synchronized playback
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
 - After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays
@@ -192,7 +193,7 @@ sequenceDiagram
     Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/hello (server info, connection_reason)
 
-    Client->>Server: client/state (state: synchronized)
+    Client->>Server: client/state (state: not_synchronized)
     alt Player role
         Client->>Server: client/state (player: volume, muted)
     end
@@ -201,6 +202,9 @@ sequenceDiagram
         Client->>Server: client/time (client clock)
         Server->>Client: server/time (timing + offset info)
     end
+
+    Note over Client,Server: Client establishes clock synchronization
+    Client->>Server: client/state (state: synchronized)
 
     alt Stream starts
         Server->>Client: stream/start (codec, format details)
@@ -324,9 +328,9 @@ Must be sent immediately after receiving [`server/hello`](#server--client-server
 
 For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
-- `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and synchronized with server timestamps
-  - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
+- `state`: 'synchronized' | 'not_synchronized' | 'external_source' - operational state of the client
+  - `'synchronized'` - client's clock is synchronized with the server; ready to receive timestamped binary data
+  - `'not_synchronized'` - client's clock is not yet synchronized with the server; the client's initial state until clock synchronization is established. The server does not send binary data to a client in this state
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
@@ -535,7 +539,7 @@ When [`stream/clear`](#server--client-streamclear) includes the player role, cli
 
 ### Server → Client: Audio Chunks (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
 
 - Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
@@ -703,7 +707,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 ### Server → Client: Artwork (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
 
 - Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
@@ -773,7 +777,7 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages should be rejected if there is no active stream. Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
