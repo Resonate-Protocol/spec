@@ -279,23 +279,83 @@ The concatenated `data` from all fragments yields the original message's payload
 
 ## Clock Synchronization
 
-Clients continuously send `client/time` messages to maintain an accurate offset from the server's clock. The frequency of these messages is determined by the client based on network conditions and clock stability.
+Clients send `client/time` messages to maintain an accurate offset from the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. See the time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section for a known-good burst-strategy baseline.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients must use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
 ## Playback Synchronization
 
-- Each client is responsible for maintaining synchronization with the server's timestamps
-- Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
-- The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
-- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
-- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays
-- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
-- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback
-- Servers factor in each client's `static_delay_ms` when calculating how far ahead to send audio, keeping effective buffer headroom constant
+This section defines rules that require all implementations to provide a good experience, keeping playback seamlessly synchronized between speakers. While implementations can choose their own strategy, this section describes the minimal requirements that must be met by players. For a recommended strategy that is compliant, see the [Suggested correction strategy](#suggested-correction-strategy) subsection below.
+
+### Correction Quality
+
+- **Smooth corrections:** In steady state, every correction applied to the audio output MUST avoid audible discontinuities (clicks, zipper noise, or similar artifacts). Implementations that work by simply adding or removing discrete samples MUST interpolate or blend across the affected region.
+- **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed. Applies at all times during playback, including recovery from disturbances.
+
+### Sync Accuracy
+
+Sync accuracy is measured at the audio output, against what the time-filter predicts the local time should be (not against the true server clock). Use of the [time-filter](#clock-synchronization) is required to meet these minimum standards. The error is the absolute difference between when a sample actually plays in the client's local clock and the local time the time-filter predicts for that sample's server timestamp.
+
+Each client is responsible for maintaining its own synchronization with the server's timestamps.
+
+- **Accuracy floor:** Implementations MUST keep this error within ±2 ms.
+- **Accuracy target:** Implementations SHOULD aim for ±1 ms.
+- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
+
+### Startup Behavior
+
+- **No startup warble:** During startup, the client MUST NOT produce audible pitch modulation, warble, or other transient artifacts in the audio output.
+
+### Server Audio Send Constraints
+
+- **Chunk duration cap:** A server MUST NOT send an audio chunk longer than 150 ms in duration, regardless of codec, sample rate, or stream type. Duration is `(samples_in_chunk / sample_rate_hz) * 1000` ms.
+- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
+- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays.
+- Servers factor in each client's [`static_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
+
+### Suggested correction strategy
+
+This is one valid correction strategy for clients with the `player` role: a per-chunk push model. It is an example, not a requirement. New implementers can use it as a starting point, especially on platforms where CPU or memory usage is limited.
+
+Other strategies are allowed as long as they meet the rules in this section.
+
+#### Per-chunk push model
+
+This strategy combines two mechanisms: **soft sync** handles small steady-state drift in approximately 21 µs increments per chunk, and **hard sync** handles larger one-shot errors. A "frame" is one sample across all channels (e.g. one stereo pair).
+
+**Soft sync.** Per decoded chunk:
+
+1. Measure the time error between when the chunk is scheduled to play (the chunk's server timestamp translated to local time via the time-filter) and where the renderer will reach the chunk in its output buffer.
+2. If the absolute error is below the soft-sync dead band (100 µs), pass the chunk through unmodified.
+3. Otherwise, apply approximately 21 µs of correction at the chunk's end by inserting (positive error) or dropping (negative error) `N` frames, where `N = round(21 µs × sample_rate_hz / 1,000,000)`. At common sample rates: N=1 at 44.1 kHz and 48 kHz, N=2 at 96 kHz, N=4 at 192 kHz.
+4. Output the modified chunk. Residual error beyond ~21 µs carries over to subsequent chunks.
+
+**Insert N frames at the chunk's end.** Let the chunk consist of frames `F[0], F[1], ..., F[L-1]` with `L ≥ 2`. Generate N intermediate frames between `F[L-2]` and `F[L-1]` using linear interpolation. For each `i` from 1 to N, per channel `c`:
+
+```
+M_i[c] = ((N+1-i) × F[L-2][c] + i × F[L-1][c]) / (N+1)
+```
+
+Insert all N between `F[L-2]` and `F[L-1]`. Output sequence: `F[0], ..., F[L-2], M_1, M_2, ..., M_N, F[L-1]`. Length: `L + N`. For N=1 this reduces to `M_1 = (F[L-2] + F[L-1]) / 2`, the per-channel mean.
+
+**Drop N frames at the chunk's end.** Replace the last N+1 original frames with a single frame equal to their per-channel average:
+
+```
+M[c] = (F[L-N-1][c] + F[L-N][c] + ... + F[L-1][c]) / (N+1)
+```
+
+Output sequence: `F[0], ..., F[L-N-2], M`. Length: `L - N`. For N=1 this reduces to `M = (F[L-2] + F[L-1]) / 2`, replacing the second-to-last frame and discarding the last.
+
+Compute all intermediate values at a precision at least as high as the source samples (e.g. expand to signed 32-bit, compute, repack) to avoid overflow at full-scale samples.
+
+**Hard sync.** When the measured error exceeds 2 ms, apply a one-shot correction *before* soft sync runs on the chunk:
+- Audio ahead of schedule (negative error): drop a leading prefix of the chunk equal to the time excess.
+- Audio behind schedule (positive error): insert silence of equivalent duration before the chunk.
+
+Hard sync introduces a brief audible discontinuity by design and should be rare; soft sync handles steady-state drift.
 
 ```mermaid
 sequenceDiagram
