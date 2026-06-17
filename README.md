@@ -1071,6 +1071,22 @@ Response to a `management/*` request. The at-most-one-in-flight rule (see [Manag
   - `not_found` - the request targets an identifier (e.g., `psk_id`) that does not exist on the client
   - `storage_exhausted` - the client cannot persist the change due to full storage
 - `data?`: object - operation-specific response payload. Present only when the in-flight request defines one and `result` is `ok`; see each request for the shape.
+- `storage?`: object - storage accounting; a client that tracks bounded storage includes it on every result except `permission_denied`. See [Storage accounting](#storage-accounting).
+
+#### Storage accounting
+
+Records (and, on some clients, operator-set pairing secrets) share one storage pool. A client that can bound this pool reports it in the `storage` key, letting a server show remaining capacity and predict which operations will succeed; a client whose storage is effectively unbounded or of unknown size omits the key, and the server relies on `storage_exhausted` alone.
+
+- `free`: integer - currently free space.
+- `capacity`: integer - total pool size.
+- `cost_individual`: integer - what a new stored-pubkey record consumes.
+- `cost_shared`: integer - what a new shared-PSK record consumes.
+
+All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a kind can persist when `free` is at least its cost; `storage_exhausted` however stays authoritative.
+
+A secret set via [`set-pairing-config`](#server--client-managementset-pairing-config) may also draw on the pool but isn't covered by these costs.
+
+The object always carries `free`; `capacity` and the costs appear additionally on [`list-records`](#server--client-managementlist-records) and [`get-pairing-config`](#server--client-managementget-pairing-config) results.
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
