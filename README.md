@@ -1,7 +1,5 @@
 # The Sendspin Protocol
 
-_This is raw, unfiltered and experimental._
-
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
 ## Definitions
@@ -230,7 +228,7 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each binary message is a Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type.
+WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each binary message is a Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
@@ -298,6 +296,7 @@ Each [`server/time`](#server--client-servertime) response provides the four time
 - When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
 - The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
+- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
 - Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback
 - Servers factor in each client's `static_delay_ms` when calculating how far ahead to send audio, keeping effective buffer headroom constant
@@ -338,7 +337,7 @@ sequenceDiagram
             Server->>Client: binary Types 8-11 (artwork channels 0-3)
         end
         alt Visualizer role
-            Server->>Client: binary Type 16 (visualization data)
+            Server->>Client: binary Types 16-20 (loudness, beat, f_peak, spectrum, peak)
         end
     end
 
@@ -352,7 +351,7 @@ sequenceDiagram
     end
 
     alt Controller role
-        Client->>Server: client/command (controller: play/pause/volume/switch/etc)
+        Client->>Server: client/command (controller: play/pause/seek/volume/switch/etc)
     end
 
     alt State changes
@@ -428,6 +427,7 @@ Players that can output audio should have the role `player`.
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
+  - `mac_address?`: string - MAC address of the network interface the connection is opened on, in lowercase colon-separated form (e.g., `aa:bb:cc:dd:ee:ff`)
 - `trust_level`: 'owner' | 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which management operations the server may issue. `'owner'` and `'user'` reflect the value recorded on the client's pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `has_owner`: boolean - whether the client has an owner server recorded. When `false`, the connected server may claim ownership via [`server/claim-ownership`](#server--client-serverclaim-ownership)
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
@@ -505,7 +505,7 @@ Client sends state updates to the server. Contains client-level state and role-s
 
 Must be sent after the initial [`server/activate`](#server--client-serveractivate), and whenever any state changes thereafter. When a role becomes active in `active_roles`, send its full state.
 
-For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
+The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
   - `'synchronized'` - client is operational and synchronized with server timestamps
@@ -578,10 +578,11 @@ Instructs clients to clear buffers without ending the stream. Used for seek oper
 
 ### Client → Server: `stream/request-format`
 
-Request different stream format (upgrade or downgrade). Available for clients with the `player` or `artwork` role.
+Request different stream format (upgrade or downgrade). Available for clients with the `player`, `artwork`, or `visualizer` role.
 
 - `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
 - `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
+- `visualizer?`: object - only for clients with the `visualizer` role ([see visualizer object details](#client--server-streamrequest-format-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -1115,6 +1116,17 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
 
+**Note:** [`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players should report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Both should factor in expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients). Do not include `static_delay_ms` in these values; the server applies `static_delay_ms` separately when calculating send-ahead.
+
+**Server behavior:**
+- For live/realtime sources, compute per-player send-ahead as `max(required_lead_time_ms, min_buffer_ms) + static_delay_ms`. The queue cannot grow after playback begins, so this single floor satisfies both startup lead (codec/DAC warmup) and the ongoing jitter buffer. For buffered sources (file playback, prefetched streams) where the queue grows past `min_buffer_ms` naturally once playback starts, servers MAY relax the startup floor to `required_lead_time_ms + static_delay_ms` to avoid paying the `min_buffer_ms` wait as pure startup latency. Source classification is server-side; the wire protocol does not signal it.
+- For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
+- When the maximum decreases mid-stream (player leaves group, or updates timing), the server may keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
+- Especially for live streams, servers must schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
+- For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
+- `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
+- Servers may rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
+
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
 ### Client → Server: `client/state` player object
@@ -1126,12 +1138,18 @@ Informs the server of player-specific state changes. Only for clients with the `
 State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
-  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `static_delay_ms`: integer - static delay in milliseconds (0-5000), always required for players
+  - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `static_delay_ms`: integer - static delay in milliseconds (0-5000), REQUIRED for players
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from server transmit time of the start/restart trigger ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
+  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players.
   - `supported_commands?`: string[] - subset of: 'set_static_delay'
 
+**Delta updates:** The presence requirements above (REQUIRED fields, and fields that MUST be included when a command is supported) describe a player's full state, reported in the initial message. In any later update a player MAY omit fields whose values have not changed, per the delta rules in [`client/state`](#client--server-clientstate).
+
 **Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections. Clients may update `static_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
+
+**Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or on link-type change). Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
 
 ### Client → Server: `stream/request-format` player object
 
@@ -1196,9 +1214,11 @@ The `controller` object in [`client/command`](#client--server-clientcommand) has
 Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+  - `position_ms?`: integer - absolute playback position in milliseconds, range 0 to [`seek_max_ms`](#server--client-serverstate-controller-object), only set if `command` is `seek`
+  - `offset_ms?`: integer - signed offset in milliseconds from the current position (positive forward, negative backward), only set if `command` is `seek_relative`
 
 #### Command behaviour
 
@@ -1215,6 +1235,8 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'shuffle' - randomize playback order
 - 'unshuffle' - restore original playback order
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+- 'seek' - seek to an absolute position. The client MUST include `position_ms`; the server MUST ignore the command if `position_ms` is outside the range 0 to `seek_max_ms`
+- 'seek_relative' - seek by an offset from the current position. The client MUST include `offset_ms`; the server applies it on a best-effort basis and MUST clamp the result to the seekable range
 
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
@@ -1250,11 +1272,12 @@ For clients **without** the `player` role, the cycle includes:
 The `controller` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `controller`: object
-  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
   - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle`: boolean - shuffle mode enabled/disabled
+  - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
@@ -1361,22 +1384,52 @@ The timestamp indicates when this artwork should be displayed. Clients must tran
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
 ## Visualizer messages
-This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data like FFT information that corresponds to the current audio timeline.
+This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
+
+Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven and not throttled by `rate_max`; all other types are periodic.
+
+**`beat` vs `peak`:** `beat` is a musical pulse derived from tempo/beat tracking, landing on the rhythmic grid with downbeats marking bar starts. Accurate beat detection often relies on offline analysis (e.g. neural beat trackers); servers without such analysis omit the type. `peak` is an energy onset detected live from the audio stream and fires on any transient (drum hits, cymbal crashes, attacks), independent of the rhythmic grid. A `beat` and a `peak` can fire on the same hit, or a `peak` can fire mid-bar with no `beat`.
 
 ### Client → Server: `client/hello` visualizer@v1 support object
 
 The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `visualizer@v1_support`: object
-  - Desired FFT details (to be determined)
-  - `buffer_capacity`: integer - max size in bytes of visualization data messages in the buffer that are yet to be displayed
+  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'
+  - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting each message's full wire size (message-type byte + timestamp + data)
+  - `rate_max`: integer - maximum periodic visualization frames per second (applies to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo. Clients should set this to their display refresh rate
+  - `spectrum?`: object - spectrum configuration, required if `types` includes 'spectrum'
+    - `n_disp_bins`: integer - number of display bins (i.e. bars on a graphical equalizer)
+    - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins. 'mel' uses the HTK mel formula (`m = 2595 * log10(1 + f/700)`), 'log' uses base-10 logarithm of frequency, 'lin' uses linear frequency spacing
+    - `f_min`: integer - lowest frequency in Hz to bin
+    - `f_max`: integer - highest frequency in Hz to bin
 
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `visualizer`: object
-  - FFT details (to be determined)
+  - `types`: string[] - visualization data types the server will stream
+  - `rate_max`: integer - periodic frames per second the server will emit
+  - `tracks_downbeats`: boolean - only if `types` includes 'beat'. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
+  - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'
+    - `n_disp_bins`: integer - number of display bins
+    - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
+    - `f_min`: integer - lowest frequency in Hz
+    - `f_max`: integer - highest frequency in Hz
+
+### Client → Server: `stream/request-format` visualizer object
+
+The `visualizer` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+
+- `visualizer`: object
+  - `types?`: string[] - new set of visualization data types
+  - `rate_max?`: integer - new periodic frames-per-second cap
+  - `spectrum?`: object - new spectrum configuration ([see spectrum object details](#client--server-clienthello-visualizerv1-support-object))
+
+All fields are optional; omitted fields keep their current value.
+
+Response: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
 
 ### Server → Client: `stream/clear` visualizer
 
@@ -1384,13 +1437,46 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages should be rejected if there is no active stream. Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
-- Byte 0: message type `16` (uint8)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the visualization should be displayed by the device
-- Rest of bytes: visualization data
+- Byte 0: message type (uint8, one of the types listed below)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
+- Remaining bytes: data, layout per type below
 
-The timestamp indicates when this visualization data should be displayed, corresponding to the audio timeline. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+`loudness`, `spectrum` bins, and the `f_peak` amplitude use the full `uint16` range 0-65535, where 0 = silence and 65535 = full scale. Values are A-weighted and dB-scaled: -60 dB → 0, 0 dB → 65535, mapped linearly across that range.
+
+Message types `21`, `22`, and `23` are reserved for future visualizer types within the role's 16-23 allocation and must not be used by implementations.
+
+#### `loudness` — message type `16`
+
+- 2 bytes: `uint16` value
+
+Overall A-weighted loudness in dB (see scaling above).
+
+#### `beat` — message type `17`
+
+- 1 byte: `uint8` flags. Bit 0 = downbeat (bar start). Bits 1-7 reserved, must be zero by the server, ignored by the client
+
+Musical beat event. Bit 0 is only meaningful when [`stream/start`](#server--client-streamstart-visualizer-object) sets `tracks_downbeats: true`; otherwise it is always 0.
+
+#### `f_peak` — message type `18`
+
+- 2 bytes: `uint16` freq - dominant frequency in Hz (0 = no peak detected, amp must also be 0)
+- 2 bytes: `uint16` amp - amplitude (see scaling above)
+
+Tracks the dominant FFT bin, which is not always the fundamental: strong harmonics can dominate, so do not treat `f_peak` as the musical note being played.
+
+#### `spectrum` — message type `19`
+
+- 2*n bytes: `uint16[n]` bins from low to high frequency. `n` = `n_disp_bins` in [`stream/start`](#server--client-streamstart-visualizer-object)
+
+Magnitude per display bin (see scaling above). Servers may impose an implementation-defined upper bound on `n_disp_bins` to keep per-frame size sensible.
+
+#### `peak` — message type `20`
+
+- 1 byte: `uint8` strength
+
+Energy onset event. Fires on any transient (drum hits, cymbal crashes, attacks), independent of musical timing. `strength` 0-255 lets clients scale flash intensity.
 
 ## Color messages
 This section describes messages specific to clients with the `color` role, which receive colors derived from the current audio. Colors may be extracted from album artwork, provided by the music source, or manually programmed by the server.
@@ -1405,5 +1491,5 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
   - `background_light?`: integer[] | null - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
   - `primary?`: integer[] | null - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
   - `accent?`: integer[] | null - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
-  - `on_dark?`: integer[] | null - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255
-  - `on_light?`: integer[] | null - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255
+  - `on_dark?`: integer[] | null - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
+  - `on_light?`: integer[] | null - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
