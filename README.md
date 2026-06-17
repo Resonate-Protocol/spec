@@ -318,44 +318,25 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 ### Suggested correction strategy
 
-This is one valid correction strategy for clients with the `player` role: a per-chunk push model. It is an example, not a requirement. New implementers can use it as a starting point, especially on platforms where CPU or memory usage is limited.
+This is one valid correction strategy for clients with the `player` role: discrete sample deletion and insertion. It is an example, not a requirement. New implementers can use it as a starting point, especially where CPU or memory is limited: it needs no interpolation and leaves the audio bit-exact except at the moments it corrects.
 
-Other strategies are allowed as long as they meet the rules in this section.
+Other strategies are allowed and encouraged as long as they meet the rules in this section. For example, asynchronous sample-rate conversion (ASRC) continuously resamples the stream to track the clock, trading CPU/DSP load for lower steady-state distortion than discrete frame drops.
 
-#### Per-chunk push model
+#### Sample deletion and insertion
 
-This strategy combines two mechanisms: **soft sync** handles small steady-state drift in approximately 21 µs increments per chunk, and **hard sync** handles larger one-shot errors. A "frame" is one sample across all channels (e.g. one stereo pair).
+The player renders decoded frames at their server timestamps translated to local time by the time-filter, and corrects accumulated drift by occasionally deleting or duplicating whole frames. At realistic clock drift these corrections are small and infrequent (a few per second) and individually inaudible. A "frame" is one sample across all channels (e.g. one stereo pair).
 
-**Soft sync.** Per decoded chunk:
+**Soft correction.** Per decoded chunk:
 
-1. Measure the time error between when the chunk is scheduled to play (the chunk's server timestamp translated to local time via the time-filter) and where the renderer will reach the chunk in its output buffer.
-2. If the absolute error is below the soft-sync dead band (100 µs), pass the chunk through unmodified.
-3. Otherwise, apply approximately 21 µs of correction at the chunk's end by inserting (positive error) or dropping (negative error) `N` frames, where `N = round(21 µs × sample_rate_hz / 1,000,000)`. At common sample rates: N=1 at 44.1 kHz and 48 kHz, N=2 at 96 kHz, N=4 at 192 kHz.
-4. Output the modified chunk. Residual error beyond ~21 µs carries over to subsequent chunks.
+1. Measure the time error between when the chunk is scheduled to play (its server timestamp via the time-filter) and where the renderer will reach it in the output buffer.
+2. If the absolute error is below the dead band (~100 µs), output the chunk unchanged.
+3. Otherwise correct by `N` frames: if playback is running late (the chunk reaches the output after its scheduled local time), drop `N` frames to catch up; if running early, duplicate `N` frames to wait. Residual error beyond the step carries to the next chunk.
 
-**Insert N frames at the chunk's end.** Let the chunk consist of frames `F[0], F[1], ..., F[L-1]` with `L ≥ 2`. Generate N intermediate frames between `F[L-2]` and `F[L-1]` using linear interpolation. For each `i` from 1 to N, per channel `c`:
+**Choosing N.** Use the smallest `N` that keeps up with drift, scaled to hold the step duration constant across sample rates: `N = round(21 µs × sample_rate_hz / 1,000,000)` (N=1 at 44.1 and 48 kHz, 2 at 96 kHz, 4 at 192 kHz). A chunk's correction MUST NOT exceed the ±0.5% speed cap, so `N ≤ floor(0.005 × samples_in_chunk)`. Keep `N` small; at realistic drift any `N` in this range stays masked.
 
-```
-M_i[c] = ((N+1-i) × F[L-2][c] + i × F[L-1][c]) / (N+1)
-```
+**Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-Insert all N between `F[L-2]` and `F[L-1]`. Output sequence: `F[0], ..., F[L-2], M_1, M_2, ..., M_N, F[L-1]`. Length: `L + N`. For N=1 this reduces to `M_1 = (F[L-2] + F[L-1]) / 2`, the per-channel mean.
-
-**Drop N frames at the chunk's end.** Replace the last N+1 original frames with a single frame equal to their per-channel average:
-
-```
-M[c] = (F[L-N-1][c] + F[L-N][c] + ... + F[L-1][c]) / (N+1)
-```
-
-Output sequence: `F[0], ..., F[L-N-2], M`. Length: `L - N`. For N=1 this reduces to `M = (F[L-2] + F[L-1]) / 2`, replacing the second-to-last frame and discarding the last.
-
-Compute all intermediate values at a precision at least as high as the source samples (e.g. expand to signed 32-bit, compute, repack) to avoid overflow at full-scale samples.
-
-**Hard sync.** When the measured error exceeds 2 ms, apply a one-shot correction *before* soft sync runs on the chunk:
-- Audio ahead of schedule (negative error): drop a leading prefix of the chunk equal to the time excess.
-- Audio behind schedule (positive error): insert silence of equivalent duration before the chunk.
-
-Hard sync introduces a brief audible discontinuity by design and should be rare; soft sync handles steady-state drift.
+**Large errors and startup.** When the error would otherwise exceed the ±2 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
 
 ```mermaid
 sequenceDiagram
