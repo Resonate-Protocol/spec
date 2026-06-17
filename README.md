@@ -291,8 +291,8 @@ This section defines rules that require all implementations to provide a good ex
 
 ### Correction Quality
 
-- **Smooth corrections:** In steady state, every correction applied to the audio output MUST avoid audible discontinuities (clicks, zipper noise, or similar artifacts). Implementations that work by simply adding or removing discrete samples MUST interpolate or blend across the affected region.
-- **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed. Applies at all times during playback, including recovery from disturbances.
+- **Inaudible corrections:** In steady state, individual corrections MUST NOT produce audible noise, warble, or distortion during normal listening.
+- **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed, measured as a sliding average over 150 ms. This bounds continuous (steady-state) correction. A discrete one-shot resynchronization after a disturbance (startup, buffer underrun, or an error too large to correct smoothly) is not a speed deviation and is exempt; such events MUST be rare.
 
 ### Sync Accuracy
 
@@ -300,7 +300,7 @@ Sync accuracy is measured at the audio output, against what the time-filter pred
 
 Each client is responsible for maintaining its own synchronization with the server's timestamps.
 
-- **Accuracy floor:** Implementations MUST keep this error within ±2 ms.
+- **Accuracy floor:** In steady state, implementations MUST keep this error within ±2 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
 - **Accuracy target:** Implementations SHOULD aim for ±1 ms.
 - Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
