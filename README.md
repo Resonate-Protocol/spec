@@ -74,12 +74,12 @@ A client holds at most one admitted connection at a time, classified by the high
 
 A connection with empty `activities` ranks lowest.
 
-Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last-played server").
+Clients must persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
 
 When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
 
 - An in-flight pairing is not displaced by an incoming `'playback'` or `'pairing'` connection.
-- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-played server (and the existing one's does not); otherwise the existing is kept.
+- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
 
 Subsequent `server/activate` updates do not trigger arbitration. A provisional connection that has not sent `server/activate` within 30 seconds is dropped.
 
@@ -455,7 +455,7 @@ Declares the server's current purpose on this connection. Sent as an encrypted m
 Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
 
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
-- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on connections capable of playback; absent otherwise. Persists across subsequent `server/activate` messages that omit it.
+- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`), empty on connections not capable of playback. Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it.
 - `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise.
 
 The combinations of activity sets and `selected_pair_method` the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
@@ -476,7 +476,11 @@ Enforcement on the client side:
 - If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK or the recorded `trust_level` for the server is not `'owner'` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `activities` contains `'playback'` on the Sentinel PSK but the client does not have [unpaired playback](#unpaired-playback) enabled - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 
+**Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers)), so keeping an unused activity declared would degrade multi-server cooperation.
+
 **Note:** Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
+
+**Note:** When a `server/activate` removes a role from `active_roles`, the server first sends [`stream/end`](#server--client-streamend) for any stream that role still has open, so the client never holds a live stream for an inactive role.
 
 ### Client → Server: `client/time`
 
@@ -499,7 +503,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello), and whenever any state changes thereafter.
+Must be sent after the initial [`server/activate`](#server--client-serveractivate), and whenever any state changes thereafter. When a role becomes active in `active_roles`, send its full state.
 
 For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
 
@@ -651,9 +655,15 @@ Static pairing methods (Pairing PSK, static PIN) do not take over the device's o
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
 
+### Entering and leaving pairing
+
+Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces it exactly as an [`external_source`](#external-source-handling) transition does, and sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`.
+
+The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
+
 ### Unpaired Playback
 
-A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below - in particular, the [`controller`](#controller-messages) role lets the client issue commands that affect its entire group and is a reasonable candidate to omit on `'none'`-trust sessions. The default is the manufacturer's choice. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback, with the current setting advertised in [`server/hello`](#server--client-serverhello).
+A client MAY admit `'playback'` connections on the Sentinel PSK from servers with no pairing record. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. The `'playback'` activity can carry any of the client's roles, not just `player`. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below - in particular, the [`controller`](#controller-messages) role lets the client issue commands that affect its entire group and is a reasonable candidate to omit on `'none'`-trust sessions. The default is the manufacturer's choice. The toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the client's current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_playback.enabled`. Servers must likewise allow their operator to enable or disable initiating unpaired playback, with the current setting advertised in [`server/hello`](#server--client-serverhello).
 
 **Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and the peer's static key is learned from mDNS, which is unauthenticated; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
@@ -670,7 +680,7 @@ sequenceDiagram
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
-    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=pairing_psk)
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=pairing_psk)
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
     Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
@@ -692,7 +702,7 @@ sequenceDiagram
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic PIN
-    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=dynamic_pin)
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=dynamic_pin)
     Client->>Server: client/pair-init (commit_B)
     Server->>Client: server/pair-init (nonce_A)
     Note over Client: Derive PIN from (h, nonce_B, nonce_A), emit via out-channel
@@ -737,7 +747,7 @@ All three checks must pass before the server processes [`client/pair-finalize`](
 
 **Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
 
-**Device-presence verification.** When the matched PSK is a long-term [Sendspin PSK](#definitions), the dynamic-PIN sequence runs through the PAKE round and commitment reveal, but the two `pair-finalize` messages are omitted: no new long-term PSK is established. A failed check has no effect on the existing pairing record and does not increment the PIN-pairing [failure counter](#pin-pairing-lockout). After verifying [`client/pair-confirm`](#client--server-clientpair-confirm), the server sends a fresh [`server/activate`](#server--client-serveractivate) to resume the prior state. The purpose is to confirm that the device holding the long-term PSK is the same physical device the operator is currently observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
+**Device-presence verification.** When the matched PSK is a long-term [Sendspin PSK](#definitions), the dynamic-PIN sequence runs through the PAKE round and commitment reveal, but the two `pair-finalize` messages are omitted: no new long-term PSK is established. A failed check has no effect on the existing pairing record and does not increment the PIN-pairing [failure counter](#pin-pairing-lockout). After verifying [`client/pair-confirm`](#client--server-clientpair-confirm), the server sends a fresh [`server/activate`](#server--client-serveractivate) to [leave pairing](#entering-and-leaving-pairing), reactivating the client's roles. The purpose is to confirm that the device holding the long-term PSK is the same physical device the operator is currently observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
 
 ### Static PIN Pairing Flow
 
@@ -753,7 +763,7 @@ sequenceDiagram
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks static PIN
-    Server->>Client: server/activate (activities=['pairing'], selected_pair_method=static_pin)
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=static_pin)
     Note over Client: Wait for operator to open pairing window
     Client->>Server: client/pair-init
     Note over Server: Operator enters static PIN
