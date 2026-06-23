@@ -18,7 +18,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 - **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value whose length is [negotiated per attempt](#dynamic-pin-pairing-flow).
-- **Sendspin Trust Level** - one of `owner`, `user`, or `none`, expressing the trust the client extends to the server. Ordered `none < user < owner`. `owner` and `user` are recorded client-side per pairing record; `none` is not stored but is the effective trust level on any connection where no pairing record exists for the peer. Servers with `owner` trust may issue [management commands](#management) to the client; servers with `user` trust are restricted to normal playback and control flows; and servers with `none` trust are further restricted to conducting a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
+- **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
 
 ## Role Versioning
 
@@ -428,8 +428,7 @@ Players that can output audio should have the role `player`.
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
   - `mac_address?`: string - MAC address of the network interface the connection is opened on, in lowercase colon-separated form (e.g., `aa:bb:cc:dd:ee:ff`)
-- `trust_level`: 'owner' | 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which management operations the server may issue. `'owner'` and `'user'` reflect the value recorded on the client's pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
-- `has_owner`: boolean - whether the client has an owner server recorded. When `false`, the connected server may claim ownership via [`server/claim-ownership`](#server--client-serverclaim-ownership)
+- `trust_level`: 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which operations the server may issue. `'user'` reflects a pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
   - `controller@v1` - controls the current Sendspin group
@@ -473,7 +472,7 @@ A playback-capable connection MAY carry a non-empty `active_roles` even when `'p
 Enforcement on the client side:
 
 - If `'pairing'` is in activities and `selected_pair_method` is not in the allowed set for the matched PSK, or names a method the client did not list - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
-- If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK or the recorded `trust_level` for the server is not `'owner'` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If, on the Sentinel PSK, the client does not have [unpaired access](#unpaired-access) enabled and a `server/activate` either declares a non-empty `active_roles` or contains `'playback'` in `activities` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 
 **Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers)), so keeping an unused activity declared would degrade multi-server cooperation.
@@ -614,7 +613,7 @@ Sent by a paired server to drop its own pairing record from the client. Valid at
 
 Client behavior:
 
-- Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection. Removing the last `owner`-trust record flips `has_owner` to `false` (see [Ownership Claim](#ownership-claim)).
+- Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
 - If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](#server--client-managementremove-record).
 - If the connection's `trust_level` is `'none'` (e.g., an in-flight pairing handshake), ignore the message and continue unchanged.
 
@@ -629,7 +628,7 @@ Upon receiving this message, the server should initiate the disconnect.
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
-  - `unauthorized` - the client refused the connection because the server declared an activity set it is not authorized for (e.g., `'management'` without `'owner'` [trust level](#definitions)). Server should not auto-reconnect with the same activity set
+  - `unauthorized` - the client refused the connection because the server declared an activity set it is not authorized for (e.g., `'management'` without `'user'` [trust level](#definitions)). Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
@@ -825,7 +824,7 @@ The following rules are mandatory for clients implementing `static_pin` or `dyna
 - **Per-method failure counter.** The client maintains a failure counter for each PIN-pairing method family (`static_pin` and `dynamic_pin` tracked independently). The counter is persisted across reboots. It is not partitioned by `server_id` or source IP: a single per-method counter for the device.
 - **Increment.** The counter for a method increments on each inner-authentication failure observed in that method's flow.
 - **Reset.** The counter for a method resets to zero on a successful pairing finalization for that method.
-- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from an `owner`-trust server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
+- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from a paired server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
 - **Device-presence verification.** Its failures do not increment any counter, and its handshakes proceed regardless of dynamic-PIN lockout state. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
 
 ### Client → Server: `client/hello` pair-method descriptor
@@ -913,40 +912,15 @@ Aborts a pairing attempt. The sender closes the connection after sending.
 
 ## Management
 
-This section covers ownership establishment and the management commands an `owner`-trust server may issue.
+This section covers the management commands a paired (`user`-trust) server may issue.
 
-Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the recorded `trust_level` for the server is `'owner'`; if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
+Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [Sendspin PSK](#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
 
 All `management/*` requests are answered by a single [`management/result`](#client--server-managementresult) message. At most one management request may be in flight per connection; in-order WebSocket delivery makes the reply unambiguous.
 
-### Ownership Claim
-
-A paired server MAY elevate its record to `owner` by sending [`server/claim-ownership`](#server--client-serverclaim-ownership) while `'management'` is not in activities and the current [`client/hello`](#client--server-clienthello) reports `has_owner: false`.
-
-A server MUST prompt the user for consent before sending [`server/claim-ownership`](#server--client-serverclaim-ownership), and is encouraged to defer the claim until the user invokes an action that requires `owner` trust. A server holding `owner` trust MUST expose user-accessible controls to demote its own record to `user` and to promote another paired record to `owner` (both via [`management/update-record`](#server--client-managementupdate-record)).
-
-The client MUST set `has_owner: false` when the last record at `trust_level: 'owner'` loses that trust by any of:
-- [`server/unpair`](#server--client-serverunpair) issued by that `owner`-trust server,
-- [`management/remove-record`](#server--client-managementremove-record) targeting that record,
-- [`management/update-record`](#server--client-managementupdate-record) demoting it to `user`.
-
-#### Server → Client: `server/claim-ownership`
-
-No payload fields. See [Ownership Claim](#ownership-claim) for when this message is valid.
-
-The client responds with [`client/claim-ownership-result`](#client--server-clientclaim-ownership-result). On success, the requesting server's record is updated to `trust_level: 'owner'`; on failure, the record is unchanged.
-
-#### Client → Server: `client/claim-ownership-result`
-
-Response to [`server/claim-ownership`](#server--client-serverclaim-ownership).
-
-- `result`: 'ok' | 'already_owned'
-  - `ok` - the requesting server is now the client's owner. The client records this server's `server_id` as owner and reports `has_owner: true` to all subsequent connections
-  - `already_owned` - the client already had an owner when the request was processed (e.g., the server connected with a stale `has_owner: false`, or `has_owner` flipped between [`client/hello`](#client--server-clienthello) and the claim)
-
 ### Records
 
-Read, create, modify, and remove the pairing records stored by the client. Each record holds a [Sendspin PSK](#definitions) and a [trust level](#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [Sendspin PSK](#definitions); every record carries `user` [trust level](#definitions). Records come in two kinds:
 
 - **Stored-pubkey records** bind a per-server PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
@@ -961,7 +935,6 @@ On success, `data: { records: object[] }`. Each entry in `records`:
 
 - `psk_id`: string
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
-- `trust_level`: 'owner' | 'user'
 
 Possible outcomes: `ok`, `permission_denied`.
 
@@ -971,20 +944,8 @@ Add a pairing record directly.
 
 - `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
-- `trust_level`: 'owner' | 'user'
 
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
-
-#### Server → Client: `management/update-record`
-
-Modify an existing pairing record (promote / demote).
-
-- `psk_id`: string
-- `trust_level`: 'owner' | 'user' - new trust level.
-
-Demoting the last `owner`-trust record flips `has_owner` to `false` (see [Ownership Claim](#ownership-claim)). Demoting the requester's own record closes the management session with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'` after the response.
-
-Possible outcomes: `ok`, `permission_denied`, `not_found`, `invalid`.
 
 #### Server → Client: `management/remove-record`
 
@@ -992,7 +953,7 @@ Remove a pairing record.
 
 - `psk_id`: string
 
-Removing the last `owner`-trust record flips `has_owner` to `false` (see [Ownership Claim](#ownership-claim)). Removing the requester's own record closes the management session with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'` after the response.
+Removing the requester's own record closes the management session with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'` after the response.
 
 A record that is still referenced by a `record_mode.psk_id` (see [Record mode](#record-mode)) cannot be removed.
 
