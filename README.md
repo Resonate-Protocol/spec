@@ -467,13 +467,13 @@ The combinations of activity sets and `selected_pair_method` the server may legi
 
 `selected_pair_method` must additionally match the `method` field of one of the [pair-method descriptors](#client--server-clienthello-pair-method-descriptor) the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
-**Playback-capable connections.** A connection is *playback-capable* when `'playback'` is in its `activities`, or when adding `'playback'` to its current `activities` would yield an activity set the server may declare for the matched PSK. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`.
+**Playback-capable connections.** A connection is *playback-capable* when its `activities` extended with `'playback'` are an allowed set for the matched PSK; a connection already declaring `'playback'` is therefore playback-capable exactly when its `activities` are an allowed set. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`.
 
-Enforcement on the client side:
+`server/activate` is *admissible* when it satisfies the constraints above. When one is not admissible, the client closes the connection, selecting the reason by the first rule that applies:
 
-- If `'pairing'` is in activities and `selected_pair_method` is not in the allowed set for the matched PSK, or names a method the client did not list - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
-- If a `server/activate` would add `'management'` to activities and the matched PSK is not a Sendspin PSK - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
-- If, on the Sentinel PSK, the client does not have [unpaired access](#unpaired-access) enabled and a `server/activate` either declares a non-empty `active_roles` or contains `'playback'` in `activities` - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If the matched PSK is the [Sentinel PSK](#pre-shared-key), the client does not have [unpaired access](#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `'pairing'` is in `activities` with a `selected_pair_method` the matched PSK disallows or the client did not offer - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
 
 **Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers)), so keeping an unused activity declared would degrade multi-server cooperation.
 
