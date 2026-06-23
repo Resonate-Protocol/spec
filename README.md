@@ -173,7 +173,7 @@ The prologue mixed into the Noise handshake state on both sides is the concatena
 
 ### Failure Handling
 
-Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket silently. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
@@ -452,7 +452,7 @@ Declares the server's current purpose on this connection. Sent as an encrypted m
 Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
 
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
-- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`), must be empty on connections not capable of playback. Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it.
+- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below).
 - `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise.
 
 The combinations of activity sets and `selected_pair_method` the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
@@ -467,7 +467,7 @@ The combinations of activity sets and `selected_pair_method` the server may legi
 
 `selected_pair_method` must additionally match the `method` field of one of the [pair-method descriptors](#client--server-clienthello-pair-method-descriptor) the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
-A playback-capable connection MAY carry a non-empty `active_roles` even when `'playback'` is not currently in `activities`. On the Sentinel PSK, a non-empty `active_roles` requires [unpaired access](#unpaired-access).
+**Playback-capable connections.** A connection is *playback-capable* when `'playback'` is in its `activities`, or when adding `'playback'` to its current `activities` would yield an activity set the server may declare for the matched PSK. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`.
 
 Enforcement on the client side:
 
@@ -665,7 +665,7 @@ The `server/activate` that ends the pairing transition declares the connection's
 
 A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below. The default is the manufacturer's choice. The client's toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and its current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`. Servers must likewise allow their operator to enable or disable offering unpaired access; the offer is conveyed to the client through [`active_roles`](#server--client-serveractivate), not a separate flag.
 
-**Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and the peer's static key is learned from mDNS, which is unauthenticated; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
+**Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and in the unpaired case neither peer's static key is bound to its identity by any authenticated out-of-band exchange; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
 ### Pairing PSK Flow
 
@@ -888,7 +888,7 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate). Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
 
-- `long_term_psk`: string - 43-character base64url-encoded 32-byte PSK (no padding). See [Long-term PSK delivery](#long-term-psk-delivery)
+- `long_term_psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
 
 #### Server → Client: `server/pair-finalize`
 
