@@ -934,6 +934,7 @@ On success, `data: { records: object[] }`. Each entry in `records`:
 
 - `psk_id`: string
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
+- `used`: boolean - `true` once a server has authenticated a session with this record's PSK
 
 Possible outcomes: `ok`, `permission_denied`.
 
