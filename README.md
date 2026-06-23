@@ -907,7 +907,6 @@ Aborts a pairing attempt. The sender closes the connection after sending.
   - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
   - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
   - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the commitment opening or PIN binding check failed
-  - `storage_exhausted` (client) - client cannot persist a new pairing record and has no fallback policy
   - `user_cancelled` (client) - operator aborted the pairing through a local UI
 
 ## Management
@@ -971,16 +970,14 @@ On success, `data` is shaped as:
 
 - `pairing_psk`: object
   - `enabled`: boolean
-  - `record_mode`: object - see [Record mode](#record-mode)
 - `static_pin?`: object
   - `enabled`: boolean
   - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
-  - `record_mode`: object - see [Record mode](#record-mode)
 - `dynamic_pin?`: object
   - `enabled`: boolean
-  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
   - `min_pin_length`: integer - the shortest dynamic PIN length in digits the client will accept (4–12); see [PIN length](#dynamic-pin-pairing-flow)
-  - `record_mode`: object - see [Record mode](#record-mode)
+  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
+- `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](#unpaired-access)
   - `enabled`: boolean
 
@@ -992,22 +989,20 @@ Possible outcomes: `ok`, `permission_denied`.
 
 #### Server → Client: `management/set-pairing-config`
 
-Modify per-method pairing config.
+Modify pairing config.
 
 - `pairing_psk?`: object
   - `enabled?`: boolean
   - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured Pairing PSK
-  - `record_mode?`: object - see [Record mode](#record-mode)
 - `static_pin?`: object
   - `enabled?`: boolean
   - `pin?`: string - 8 decimal digits; replaces the configured static PIN
-  - `record_mode?`: object - see [Record mode](#record-mode)
   - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
 - `dynamic_pin?`: object
   - `enabled?`: boolean
   - `min_pin_length?`: integer - the shortest dynamic PIN length in digits the client will accept; must be in 4–12 range. See [PIN length](#dynamic-pin-pairing-flow)
-  - `record_mode?`: object - see [Record mode](#record-mode)
   - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
+- `record_mode?`: object - see [Record mode](#record-mode)
 - `unpaired_access?`: object - see [Unpaired Access](#unpaired-access)
   - `enabled?`: boolean
 
@@ -1017,16 +1012,14 @@ Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`,  `sto
 
 #### Record mode
 
-When a server completes pairing via any method, the resulting record is created according to that method's `record_mode`, configured via [`management/set-pairing-config`](#server--client-managementset-pairing-config).
+When a server completes pairing via any method, the resulting record is created according to the client's `record_mode`, a setting configured via [`management/set-pairing-config`](#server--client-managementset-pairing-config).
 
-`record_mode` is an object: `{ kind, psk_id? }`.
+`record_mode?`: object
+- `psk_id`: string - the shared-PSK record used as the storage-exhaustion fallback.
 
-- `kind: 'individual'`: a new stored-pubkey record is created with a freshly generated per-server PSK (32 bytes from a CSPRNG). On storage exhaustion:
-  - **without `psk_id`**: the pairing fails with [`pair/abort`](#client--server-pairabort) reason `storage_exhausted`.
-  - **with `psk_id`**: the client falls back to admitting the server under the shared-PSK record at `psk_id`.
-- `kind: 'shared'` (requires `psk_id`): the paired server is admitted directly under the existing shared-PSK record identified by `psk_id`; the server receives the shared PSK as its long-term PSK in [`client/pair-finalize`](#client--server-clientpair-finalize).
+The client creates a stored-pubkey record bound to the server, holding a freshly generated per-server [Sendspin PSK](#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
 
-Whenever `record_mode.psk_id` is set, the record it references MUST be a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `record_mode.psk_id` to a missing or stored-pubkey record is rejected with `invalid`. Once set, the referenced shared-PSK record cannot be removed while the reference exists; removal attempts return `invalid`.
+`psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
 
 ### Client → Server: `management/result`
 
