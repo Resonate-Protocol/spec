@@ -1249,10 +1249,14 @@ Example `client/state` excerpt:
 
 ### Client → Server: `client/command` source object
 
-Source clients may send commands to inform the server about user-initiated capture actions (implementation-defined).
+The `source` object in [`client/command`](#client--server-clientcommand) has this structure:
+
+Notifies the server of a capture change initiated at the source rather than by a server [`command`](#server--client-servercommand-source-object), so the server can apply its own ingest policy (for example, switching playback to a source that just started).
 
 - `source`: object
   - `command`: 'started' | 'stopped'
+    - `started`: capture began at the source. A source that [starts ingest on its own](#default-ingest-behavior) sends this with its `input_stream/start`.
+    - `stopped`: capture ended at the source.
 
 ### Server → Client: `server/command` source object
 
