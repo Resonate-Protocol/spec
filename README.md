@@ -1185,6 +1185,8 @@ This section describes messages specific to clients with the `source` role, whic
 
 A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the **server time domain** using the clock offset learned from `client/time`/`server/time`.
 
+**Pairing required:** A source streams captured audio (potentially from a microphone or line-in) to the server, so it MUST only run on a paired connection ([trust level](#definitions) `user`). Servers MUST NOT activate `source@v1` over [unpaired access](#unpaired-access), and a source client MUST refuse to stream when the connection's trust level is `none`.
+
 ### Client → Server: `client/hello` source@v1 support object
 
 The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
