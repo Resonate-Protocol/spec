@@ -5,8 +5,9 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
+  - **Source** - captures audio from a local input and streams it to the server
   - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
@@ -24,7 +25,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](#player-messages), [`source`](#source-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -240,7 +241,7 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Reserved for a future role
+- `000011xx` (12-15): Source role
 - `00010xxx` (16-23): Visualizer role
 - Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
@@ -431,12 +432,14 @@ Players that can output audio should have the role `player`.
 - `trust_level`: 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which operations the server may issue. `'user'` reflects a pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
+  - `source@v1` - captures audio from a local input and streams it to the server
   - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
+- `source@v1_support?`: object - only if `source@v1` is listed ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor).
@@ -511,6 +514,7 @@ The initial message MUST include all state fields. In subsequent messages, the c
   - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
+- `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -534,6 +538,7 @@ If the client is already in a solo group:
 Client sends commands to the server. Contains command objects based on the client's supported roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
+- `source?`: object - only if client has `source` role ([see source command object details](#client--server-clientcommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -554,6 +559,7 @@ Only include fields that have changed. The client will merge these updates into 
 Server sends commands to the client. Contains role-specific command objects.
 
 - `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
+- `source?`: object - only sent to clients with `source` role ([see source command object details](#server--client-servercommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -1437,14 +1443,14 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
-  - sources?: object[] - list of available/known sources on the server
-    - id: string - stable identifier of the source (typically the source client_id)
-    - name: string - friendly name
-    - state: 'idle' | 'streaming' | 'error'
-    - signal?: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence
-    - selected?: boolean - whether this source is currently selected for this group
-    - last_event?: 'started' | 'stopped' - last source event (optional)
-    - last_event_ts_us?: integer - server time in microseconds for last event (optional)
+  - `sources?`: object[] - list of available/known sources on the server
+    - `id`: string - stable identifier of the source (typically the source `client_id`)
+    - `name`: string - friendly name
+    - `state`: 'idle' | 'streaming' | 'error'
+    - `signal?`: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence
+    - `selected?`: boolean - whether this source is currently selected for this group
+    - `last_event?`: 'started' | 'stopped' - last source event (optional)
+    - `last_event_ts_us?`: integer - server time in microseconds for last event (optional)
   - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle`: boolean - shuffle mode enabled/disabled
   - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
