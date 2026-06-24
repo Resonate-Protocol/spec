@@ -1167,7 +1167,7 @@ The timestamp indicates when the first audio sample in this chunk should be outp
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (level or line sensing), and stream timestamped audio frames.
 
-A device may implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). The server may also expose its own built-in inputs (e.g., a line-in on the server host, or an attached HDMI capture device) as a virtual source client that participates in the same state model as regular source clients.
+A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). The server MAY also expose its own built-in inputs (e.g., a line-in on the server host, or an attached HDMI capture device) as a virtual source client that participates in the same state model as regular source clients.
 
 A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the server time domain using the clock offset learned from `client/time`/`server/time`.
 
@@ -1187,9 +1187,9 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `level?`: boolean - true if source reports `level`
     - `line_sense?`: boolean - true if source reports `signal`
 
-**Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+**Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
-**Note:** Servers should offer only the `supported_formats` options and avoid requesting unsupported formats.
+**Note:** Servers SHOULD offer only the `supported_formats` options and avoid requesting unsupported formats.
 
 Example `client/hello` excerpt:
 ```json
@@ -1255,7 +1255,7 @@ Notifies the server of a capture change initiated at the source rather than by a
 
 - `source`: object
   - `command`: 'started' | 'stopped'
-    - `started`: capture began at the source. A source that [starts ingest on its own](#default-ingest-behavior) sends this with its `input_stream/start`.
+    - `started`: capture began at the source. A source that [starts ingest on its own](#default-ingest-behavior) SHOULD send this with its `input_stream/start`.
     - `stopped`: capture ended at the source.
 
 ### Server → Client: `server/command` source object
@@ -1268,14 +1268,14 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls Sendspin ingest lifecycle for this source:
-  - `start`: server requests ingest to become active. The client should transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
-  - `stop`: server requests ingest to become inactive. The client should send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
+  - `start`: server requests ingest to become active. The client SHOULD transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
+  - `stop`: server requests ingest to become inactive. The client SHOULD send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
 
 #### Default ingest behavior
 
 - Effective default after handshake is `stop` (ingest inactive).
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
-- Server implementations should ignore/drop source binary chunks while ingest is not active.
+- Server implementations SHOULD ignore/drop source binary chunks while ingest is not active.
 
 A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
 
@@ -1300,7 +1300,7 @@ The `input_stream/start` message announces the active input stream format and pr
   - `channels`: integer
   - `sample_rate`: integer
   - `bit_depth`: integer
-  - `codec_header?`: string - Base64 encoded codec header (required for Opus/FLAC)
+  - `codec_header?`: string - Base64 encoded codec header (REQUIRED for Opus/FLAC)
 
 Example `input_stream/start`:
 ```json
@@ -1320,7 +1320,7 @@ Example `input_stream/start`:
 
 ### Server → Client: `input_stream/request-format`
 
-The server can request a different input stream format. Clients should respond by reconfiguring capture (if supported) and sending a new `input_stream/start` with the updated format and header.
+The server MAY request a different input stream format. Clients SHOULD respond by reconfiguring capture (if supported) and sending a new `input_stream/start` with the updated format and header.
 
 - `source`: object
   - `codec?`: 'opus' | 'flac' | 'pcm'
@@ -1330,20 +1330,20 @@ The server can request a different input stream format. Clients should respond b
 
 ### Client → Server: `input_stream/end`
 
-The client ends the current input stream. After this message, no more source audio chunks should be sent until a new `input_stream/start`.
+The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `input_stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages should be rejected by the server if the source is not in `state: 'streaming'`.
-Clients must send `input_stream/start` before the first audio chunk.
+Binary messages SHOULD be rejected by the server if the source is not in `state: 'streaming'`.
+Clients MUST send `input_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server may resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
+The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
-**Note:** Source timestamps are derived from the client's clock offset and may show small discontinuities or drift (e.g., ADC clock variance). Server implementations should not assume perfectly continuous timestamps; the audio sample stream itself should remain continuous.
+**Note:** Source timestamps are derived from the client's clock offset and may show small discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
