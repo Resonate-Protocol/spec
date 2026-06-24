@@ -1285,6 +1285,8 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
 - Server implementations should ignore/drop source binary chunks while ingest is not active.
 
+A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
+
 Example `server/command` to start capture:
 ```json
 {
