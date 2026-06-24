@@ -1177,7 +1177,7 @@ Sources are intended to be simple:
 
 A device may implement both `source` and `player` roles (e.g., a speaker with a local AUX input that can be forwarded into Sendspin).
 
-The server may also expose **built-in inputs** (e.g., a line-in on the server host, or an HDMI capture device connected to the server) as a **virtual source client**. Virtual sources participate in the same source selection and state model as regular source clients and appear in the controller `sources` list.
+The server may also expose **built-in inputs** (e.g., a line-in on the server host, or an HDMI capture device connected to the server) as a **virtual source client**. Virtual sources participate in the same source selection and state model as regular source clients.
 
 ## Source messages
 
@@ -1244,7 +1244,7 @@ The `source` object in [`client/state`](#client--server-clientstate) has this st
 - `source`: object
   - `state`: 'idle' | 'streaming' | 'error'
   - `level?`: number - optional normalized RMS/peak level (0.0-1.0), only if 'level' is supported
-  - `signal?`: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
+  - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
 
 Example `client/state` excerpt:
 ```json
@@ -1274,11 +1274,8 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 - `source`: object
   - `command?`: 'start' | 'stop'
   - `control?`: 'play' | 'pause' | 'next' | 'previous' | 'activate' | 'deactivate' - optional source control command; ignored if unsupported by the client
-  - `vad?`: object - optional VAD settings hint
-    - `threshold_db?`: number - signal threshold in dB
-    - `hold_ms?`: integer - hold time in milliseconds
 
-All fields are optional. The server may send any subset (`command`, `control`, and/or `vad`) in one message.
+All fields are optional. The server may send any subset (`command` and/or `control`) in one message.
 
 #### Source command semantics
 
@@ -1299,10 +1296,6 @@ All fields are optional. The server may send any subset (`command`, `control`, a
 - Effective default after handshake is `stop` (ingest inactive).
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
 - Server implementations should ignore/drop source binary chunks while ingest is not active.
-
-#### `vad` semantics
-
-`vad` is an optional server hint for source-side line-sense behavior (`threshold_db`, `hold_ms`). It allows centralized tuning and consistent behavior across sources/groups. Clients may ignore unsupported hints.
 
 Example `server/command` to start capture:
 ```json
@@ -1443,14 +1436,6 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
-  - `sources?`: object[] - list of available/known sources on the server
-    - `id`: string - stable identifier of the source (typically the source `client_id`)
-    - `name`: string - friendly name
-    - `state`: 'idle' | 'streaming' | 'error'
-    - `signal?`: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence
-    - `selected?`: boolean - whether this source is currently selected for this group
-    - `last_event?`: 'started' | 'stopped' - last source event (optional)
-    - `last_event_ts_us?`: integer - server time in microseconds for last event (optional)
   - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle`: boolean - shuffle mode enabled/disabled
   - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
