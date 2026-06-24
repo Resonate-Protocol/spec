@@ -1195,7 +1195,6 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24)
-  - `controls?`: string[] - optional source control commands supported by this client (subset of: 'play' | 'pause' | 'next' | 'previous')
   - `features?`: object - optional feature hints
     - `level?`: boolean - true if source reports `level`
     - `line_sense?`: boolean - true if source reports `signal`
@@ -1273,22 +1272,12 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 - `source`: object
   - `command?`: 'start' | 'stop'
-  - `control?`: 'play' | 'pause' | 'next' | 'previous' - optional source control command; ignored if unsupported by the client
-
-All fields are optional. The server may send any subset (`command` and/or `control`) in one message.
 
 #### Source command semantics
 
 - `command` controls Sendspin ingest lifecycle for this source:
   - `start`: server requests ingest to become active. The client should transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
   - `stop`: server requests ingest to become inactive. The client should send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
-- `control` is optional upstream-device control intent and only applies when advertised in `source@v1_support.controls`.
-  - `play` | `pause` | `next` | `previous`: control content playback behavior on the upstream source device (if supported).
-
-`start`/`stop` and `play`/`pause` are independent:
-
-- `start`/`stop` govern whether Sendspin ingest is active.
-- `play`/`pause` govern upstream content playback behavior.
 
 #### Default ingest behavior
 
