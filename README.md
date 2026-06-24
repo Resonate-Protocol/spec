@@ -1158,6 +1158,212 @@ Binary messages should be rejected if there is no active stream.
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`static_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
+## Sources
+
+Sendspin can also represent **audio inputs** (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, microphone/voice satellite) as first-class, selectable **sources**.
+
+A **source** is implemented as a Sendspin client role that streams audio **to** the server. The server remains the single place that performs heavy work such as resampling, transcoding, equalization, mixing, buffering, visualization and distribution to output players.
+
+Sources are intended to be simple:
+- capture/encode audio
+- optionally provide basic signal presence information (level / line sensing)
+- stream audio frames with timestamps
+
+A device may implement both `source` and `player` roles (e.g., a speaker with a local AUX input that can be forwarded into Sendspin).
+
+The server may also expose **built-in inputs** (e.g., a line-in on the server host, or an HDMI capture device connected to the server) as a **virtual source client**. Virtual sources participate in the same source selection and state model as regular source clients and appear in the controller `sources` list.
+
+## Source messages
+
+This section describes messages specific to clients with the `source` role, which capture audio from a local input and stream it to the server.
+
+A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the **server time domain** using the clock offset learned from `client/time`/`server/time`.
+
+### Client → Server: `client/hello` source@v1 support object
+
+The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `source@v1_support`: object
+  - `supported_formats`: object[] - list of supported capture/encode formats in priority order (first is preferred)
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
+    - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
+    - `bit_depth`: integer - bit depth (e.g., 16, 24)
+  - `controls?`: string[] - optional source control commands supported by this client (subset of: 'play' | 'pause' | 'next' | 'previous' | 'activate' | 'deactivate')
+  - `features?`: object - optional feature hints
+    - `level?`: boolean - true if source reports `level`
+    - `line_sense?`: boolean - true if source reports `signal`
+
+**Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+**Note:** Servers should offer only the `supported_formats` options and avoid requesting unsupported formats.
+
+Example `client/hello` excerpt:
+```json
+{
+  "type": "client/hello",
+  "payload": {
+    "client_id": "kitchen-linein",
+    "name": "Kitchen Line-In",
+    "version": 1,
+    "supported_roles": ["source@v1"],
+    "source@v1_support": {
+      "supported_formats": [
+        {
+          "codec": "opus",
+          "channels": 2,
+          "sample_rate": 48000,
+          "bit_depth": 16
+        },
+        {
+          "codec": "pcm",
+          "channels": 2,
+          "sample_rate": 48000,
+          "bit_depth": 16
+        }
+      ],
+      "controls": ["play", "pause", "next", "previous", "activate", "deactivate"],
+      "features": {
+        "line_sense": true,
+        "level": true
+      }
+    }
+  }
+}
+```
+
+### Client → Server: `client/state` source object
+
+The `source` object in [`client/state`](#client--server-clientstate) has this structure:
+
+- `source`: object
+  - `state`: 'idle' | 'streaming' | 'error'
+  - `level?`: number - optional normalized RMS/peak level (0.0-1.0), only if 'level' is supported
+  - `signal?`: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
+
+Example `client/state` excerpt:
+```json
+{
+  "type": "client/state",
+  "payload": {
+    "source": {
+      "state": "streaming",
+      "signal": "present",
+      "level": 0.42
+    }
+  }
+}
+```
+
+### Client → Server: `client/command` source object
+
+Source clients may send commands to inform the server about user-initiated capture actions (implementation-defined).
+
+- `source`: object
+  - `command`: 'started' | 'stopped'
+
+### Server → Client: `server/command` source object
+
+The `source` object in [`server/command`](#server--client-servercommand) has this structure:
+
+- `source`: object
+  - `command?`: 'start' | 'stop'
+  - `control?`: 'play' | 'pause' | 'next' | 'previous' | 'activate' | 'deactivate' - optional source control command; ignored if unsupported by the client
+  - `vad?`: object - optional VAD settings hint
+    - `threshold_db?`: number - signal threshold in dB
+    - `hold_ms?`: integer - hold time in milliseconds
+
+All fields are optional. The server may send any subset (`command`, `control`, and/or `vad`) in one message.
+
+#### Source command semantics
+
+- `command` controls Sendspin ingest lifecycle for this source:
+  - `start`: server requests ingest to become active. The client should transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
+  - `stop`: server requests ingest to become inactive. The client should send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
+- `control` is optional upstream-device control intent and only applies when advertised in `source@v1_support.controls`.
+  - `play` | `pause` | `next` | `previous`: control content playback behavior on the upstream source device (if supported).
+  - `activate` | `deactivate`: prepare or power-manage the upstream source path (for example power on/off, wake/sleep, input enable/disable).
+
+`start`/`stop` and `play`/`pause` are independent:
+
+- `start`/`stop` govern whether Sendspin ingest is active.
+- `play`/`pause` govern upstream content playback behavior.
+
+#### Default ingest behavior
+
+- Effective default after handshake is `stop` (ingest inactive).
+- Server ingest interest is represented by `command: "start"` / `command: "stop"`.
+- Server implementations should ignore/drop source binary chunks while ingest is not active.
+
+#### `vad` semantics
+
+`vad` is an optional server hint for source-side line-sense behavior (`threshold_db`, `hold_ms`). It allows centralized tuning and consistent behavior across sources/groups. Clients may ignore unsupported hints.
+
+Example `server/command` to start capture:
+```json
+{
+  "type": "server/command",
+  "payload": {
+    "source": {
+      "command": "start"
+    }
+  }
+}
+```
+
+### Client → Server: `input_stream/start`
+
+The `input_stream/start` message announces the active input stream format and provides any required codec header data.
+
+- `source`: object
+  - `codec`: 'opus' | 'flac' | 'pcm'
+  - `channels`: integer
+  - `sample_rate`: integer
+  - `bit_depth`: integer
+  - `codec_header?`: string - Base64 encoded codec header (required for Opus/FLAC)
+
+Example `input_stream/start`:
+```json
+{
+  "type": "input_stream/start",
+  "payload": {
+    "source": {
+      "codec": "flac",
+      "channels": 2,
+      "sample_rate": 48000,
+      "bit_depth": 16,
+      "codec_header": "BASE64..."
+    }
+  }
+}
+```
+
+### Server → Client: `input_stream/request-format`
+
+The server can request a different input stream format. Clients should respond by reconfiguring capture (if supported) and sending a new `input_stream/start` with the updated format and header.
+
+- `source`: object
+  - `codec?`: 'opus' | 'flac' | 'pcm'
+  - `channels?`: integer
+  - `sample_rate?`: integer
+  - `bit_depth?`: integer
+
+### Client → Server: `input_stream/end`
+
+The client ends the current input stream. After this message, no more source audio chunks should be sent until a new `input_stream/start`.
+
+### Client → Server: Source Audio Chunks (Binary)
+
+Binary messages should be rejected by the server if the source is not in `state: 'streaming'`.
+Clients must send `input_stream/start` before the first audio chunk.
+
+- Byte 0: message type `12` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
+- Rest of bytes: encoded audio frame
+
+The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server may resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
+
+**Note:** Source timestamps are derived from the client's clock offset and may show small discontinuities or drift (e.g., ADC clock variance). Server implementations should not assume perfectly continuous timestamps; the audio sample stream itself should remain continuous.
+
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
 
@@ -1231,6 +1437,14 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
+  - sources?: object[] - list of available/known sources on the server
+    - id: string - stable identifier of the source (typically the source client_id)
+    - name: string - friendly name
+    - state: 'idle' | 'streaming' | 'error'
+    - signal?: 'unknown' | 'present' | 'absent' - optional line sensing/signal presence
+    - selected?: boolean - whether this source is currently selected for this group
+    - last_event?: 'started' | 'stopped' - last source event (optional)
+    - last_event_ts_us?: integer - server time in microseconds for last event (optional)
   - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle`: boolean - shuffle mode enabled/disabled
   - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
