@@ -1164,26 +1164,12 @@ Binary messages should be rejected if there is no active stream.
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`static_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
-## Sources
-
-Sendspin can also represent **audio inputs** (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, microphone/voice satellite) as first-class, selectable **sources**.
-
-A **source** is implemented as a Sendspin client role that streams audio **to** the server. The server remains the single place that performs heavy work such as resampling, transcoding, equalization, mixing, buffering, visualization and distribution to output players.
-
-Sources are intended to be simple:
-- capture/encode audio
-- optionally provide basic signal presence information (level / line sensing)
-- stream audio frames with timestamps
-
-A device may implement both `source` and `player` roles (e.g., a speaker with a local AUX input that can be forwarded into Sendspin).
-
-The server may also expose **built-in inputs** (e.g., a line-in on the server host, or an HDMI capture device connected to the server) as a **virtual source client**. Virtual sources participate in the same source selection and state model as regular source clients.
-
 ## Source messages
+This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (level or line sensing), and stream timestamped audio frames.
 
-This section describes messages specific to clients with the `source` role, which capture audio from a local input and stream it to the server.
+A device may implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). The server may also expose its own built-in inputs (e.g., a line-in on the server host, or an attached HDMI capture device) as a virtual source client that participates in the same state model as regular source clients.
 
-A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the **server time domain** using the clock offset learned from `client/time`/`server/time`.
+A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the server time domain using the clock offset learned from `client/time`/`server/time`.
 
 **Pairing required:** A source streams captured audio (potentially from a microphone or line-in) to the server, so it MUST only run on a paired connection ([trust level](#definitions) `user`). Servers MUST NOT activate `source@v1` over [unpaired access](#unpaired-access), and a source client MUST refuse to stream when the connection's trust level is `none`.
 
@@ -1202,6 +1188,7 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `line_sense?`: boolean - true if source reports `signal`
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+
 **Note:** Servers should offer only the `supported_formats` options and avoid requesting unsupported formats.
 
 Example `client/hello` excerpt:
@@ -1228,7 +1215,6 @@ Example `client/hello` excerpt:
           "bit_depth": 16
         }
       ],
-      "controls": ["play", "pause", "next", "previous", "activate", "deactivate"],
       "features": {
         "line_sense": true,
         "level": true
