@@ -455,17 +455,17 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below).
 - `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise.
 
-The combinations of activity sets and `selected_pair_method` the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
+The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
 
-| PSK matched | Allowed activity sets | Allowed `selected_pair_method` (for `'pairing'`) |
-|---|---|---|
-| [Sendspin PSK](#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` | `'dynamic_pin'` |
-| [Sendspin Pairing PSK](#definitions) | `['pairing']` | `'pairing_psk'` |
-| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ | `'dynamic_pin'` or `'static_pin'` |
+| PSK matched | Allowed activity sets |
+|---|---|
+| [Sendspin PSK](#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` |
+| [Sendspin Pairing PSK](#definitions) | `['pairing']` |
+| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
 
 ¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](#unpaired-access) enabled.
 
-`selected_pair_method` must additionally match the `method` field of one of the [pair-method descriptors](#client--server-clienthello-pair-method-descriptor) the client listed in [`supported_pair_methods`](#client--server-clienthello).
+`selected_pair_method` MUST be `'pairing_psk'` if and only if the matched PSK is the [Sendspin Pairing PSK](#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
 **Playback-capable connections.** A connection is *playback-capable* when its `activities` extended with `'playback'` are an allowed set for the matched PSK; a connection already declaring `'playback'` is therefore playback-capable exactly when its `activities` are an allowed set. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`.
 
@@ -661,6 +661,8 @@ Pairing and playback are mutually exclusive on a connection. When a server moves
 
 The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
 
+The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received `long_term_psk`. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
+
 ### Unpaired Access
 
 A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below. The default is the manufacturer's choice. The client's toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and its current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`. Servers must likewise allow their operator to enable or disable offering unpaired access; the offer is conveyed to the client through [`active_roles`](#server--client-serveractivate), not a separate flag.
@@ -749,7 +751,7 @@ All three checks must pass before the server processes [`client/pair-finalize`](
 
 **Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
 
-**Device-presence verification.** When the matched PSK is a long-term [Sendspin PSK](#definitions), the dynamic-PIN sequence runs through the PAKE round and commitment reveal, but the two `pair-finalize` messages are omitted: no new long-term PSK is established. A failed check has no effect on the existing pairing record and does not increment the PIN-pairing [failure counter](#pin-pairing-lockout). After verifying [`client/pair-confirm`](#client--server-clientpair-confirm), the server sends a fresh [`server/activate`](#server--client-serveractivate) to [leave pairing](#entering-and-leaving-pairing), reactivating the client's roles. The purpose is to confirm that the device holding the long-term PSK is the same physical device the operator is currently observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
+**Device-presence verification.** When the server [leaves pairing](#entering-and-leaving-pairing) instead of finalizing, this flow doubles as a device-presence verification: the PIN is emitted through the device's own out-channel, so a successful round confirms the device on the connection is the one the operator is observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
 
 ### Static PIN Pairing Flow
 
@@ -823,9 +825,8 @@ The following rules are mandatory for clients implementing `static_pin` or `dyna
 
 - **Per-method failure counter.** The client maintains a failure counter for each PIN-pairing method family (`static_pin` and `dynamic_pin` tracked independently). The counter is persisted across reboots. It is not partitioned by `server_id` or source IP: a single per-method counter for the device.
 - **Increment.** The counter for a method increments on each inner-authentication failure observed in that method's flow.
-- **Reset.** The counter for a method resets to zero on a successful pairing finalization for that method.
+- **Reset.** The counter for a method resets to zero when that method's inner authentication succeeds.
 - **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from a paired server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
-- **Device-presence verification.** Its failures do not increment any counter, and its handshakes proceed regardless of dynamic-PIN lockout state. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
 
 ### Client → Server: `client/hello` pair-method descriptor
 
@@ -838,7 +839,7 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
 
 ### Messages
 
-The pairing messages below are listed in the order they appear in the dynamic PIN flow (the most complete sequence). Static PIN pairing omits the [`server/pair-init`](#server--client-serverpair-init) message and the `commit_B` / `nonce_B` fields, but still uses [`client/pair-init`](#client--server-clientpair-init) as the pairing-window-opened signal; the Pairing PSK Flow additionally omits all `pair-init`, `pair-auth`, and `pair-confirm` messages; [device-presence verification](#dynamic-pin-pairing-flow) follows the dynamic PIN sequence but omits the two `pair-finalize` messages.
+The pairing messages below are listed in the order they appear in the dynamic PIN flow (the most complete sequence). Static PIN pairing omits the [`server/pair-init`](#server--client-serverpair-init) message and the `commit_B` / `nonce_B` fields, but still uses [`client/pair-init`](#client--server-clientpair-init) as the pairing-window-opened signal; the Pairing PSK Flow additionally omits all `pair-init`, `pair-auth`, and `pair-confirm` messages.
 
 #### Client → Server: `client/pair-init`
 
@@ -877,7 +878,7 @@ On receipt, the client verifies `server_kc` before sending [`client/pair-confirm
 
 #### Client → Server: `client/pair-confirm`
 
-Client's MCF tag, plus (in dynamic PIN pairing) the opening of the earlier commitment. In PIN pairing, the client sends [`client/pair-finalize`](#client--server-clientpair-finalize) immediately after this message without waiting for a server response. In [device-presence verification](#dynamic-pin-pairing-flow), this is the client's final message in the flow.
+Client's MCF tag, plus (in dynamic PIN pairing) the opening of the earlier commitment. In PIN pairing, the client sends [`client/pair-finalize`](#client--server-clientpair-finalize) immediately after this message without waiting for a server response.
 
 - `client_kc`: string - client's MCF tag `Tb` (64 bytes base64url-encoded, 86 chars). See [PAKE](#pake)
 - `nonce_B?`: string - the 32-byte preimage of `commit_B` sent earlier in [`client/pair-init`](#client--server-clientpair-init), base64url-encoded (43 chars). Present only in dynamic PIN pairing. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
@@ -886,13 +887,13 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate). Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
+Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate).
 
 - `long_term_psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
 
 #### Server → Client: `server/pair-finalize`
 
-Acknowledges that the server has persisted the pairing record. After receiving this message, the client persists its own record. Not sent during [device-presence verification](#dynamic-pin-pairing-flow).
+Acknowledges that the server has persisted the pairing record. After receiving this message, the client persists its own record.
 
 - payload: `{}`
 
