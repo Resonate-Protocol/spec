@@ -17,7 +17,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 - **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
 - **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
-- **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value whose length is [negotiated per attempt](#dynamic-pin-pairing-flow).
+- **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value of variable length (see [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)).
 - **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
 
 ## Role Versioning
@@ -727,9 +727,9 @@ sequenceDiagram
 - `nonce_B` - 32 bytes drawn from a CSPRNG by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it (base64url-encoded, 43 chars).
 - `commit_B` - `SHA-256(nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the PIN derivation.
 
-**PIN length.** The digit count `L` is negotiated per attempt. The client's floor is `min_pin_length` from its [`dynamic_pin` descriptor](#client--server-clienthello-pair-method-descriptor); the server combines it with its own operator-configured minimum (`L = max(client_min, server_min)`, clamped to 4–12) and sends it as `pin_length` in [`server/pair-init`](#server--client-serverpair-init). The client rejects a `pin_length` outside `[min_pin_length, 12]` with [`pair/abort`](#client--server-pairabort) reason `pin_length_unacceptable`.
+**PIN length.** The digit count `L` is determined per pairing session as the larger of the two sides' minimums: `L = max(client_min, server_min)`, clamped to 4–12, where `client_min` is `min_pin_length` from the client's [`dynamic_pin` descriptor](#client--server-clienthello-pair-method-descriptor) and `server_min` is the server's operator-configured minimum. The server computes it and sends it as `pin_length` in [`server/pair-init`](#server--client-serverpair-init). The client rejects a `pin_length` outside `[min_pin_length, 12]` with [`pair/abort`](#client--server-pairabort) reason `pin_length_unacceptable`.
 
-**PIN derivation.** Once the client has received `nonce_A` and `pin_length`, both sides can derive the same PIN from the Noise handshake hash `h`, the two nonces, and the negotiated length `L`:
+**PIN derivation.** Once the client has received `nonce_A` and `pin_length`, both sides can derive the same PIN from the Noise handshake hash `h`, the two nonces, and the chosen length `L`:
 
 ```
 digest  = SHA-256("sendspin-pin-derive-v1" || h || nonce_A || nonce_B)
@@ -834,7 +834,7 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
 
 - `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - the pairing method identifier.
 - `out_channels?`: ('display' | 'speaker' | 'other')[] - informational hint for `dynamic_pin` only, listing the channels through which the per-session PIN is conveyed to the operator.
-- `min_pin_length?`: integer - the shortest PIN length in digits the client will accept for this method. Required on `dynamic_pin` descriptors, absent on others. Range 4–12 (RECOMMENDED initial value at least 6). The server combines it with its own minimum to choose the per-attempt [PIN length](#dynamic-pin-pairing-flow).
+- `min_pin_length?`: integer - the shortest PIN length in digits the client will accept for this method. Required on `dynamic_pin` descriptors, absent on others. Range 4–12 (RECOMMENDED initial value at least 6). The server combines it with its own minimum to choose the [PIN length](#dynamic-pin-pairing-flow).
 - `locked_out?`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout), `false` when ready to accept a pairing attempt. Present on PIN-method descriptors only, absent for `pairing_psk`. Lets the server render appropriate UX ("device requires manual unlock") and decide whether to attempt this method at all.
 
 ### Messages
@@ -852,7 +852,7 @@ Signals that the client is ready to proceed with the PIN-pairing flow. In static
 Server's nonce contribution in the [Dynamic PIN pairing](#dynamic-pin-pairing-flow) flow. Sent in response to [`client/pair-init`](#client--server-clientpair-init).
 
 - `nonce_A`: string - 32 bytes from a CSPRNG, base64url-encoded (43 chars). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
-- `pin_length`: integer - the negotiated [PIN length](#dynamic-pin-pairing-flow) in digits: `max(client_min, server_min)` clamped to 4–12.
+- `pin_length`: integer - the [PIN length](#dynamic-pin-pairing-flow) in digits: `max(client_min, server_min)` clamped to 4–12.
 
 Upon receipt, the client validates `pin_length` against its own `min_pin_length` (see [PIN length](#dynamic-pin-pairing-flow)), then derives and emits the PIN; the operator then types it into the server.
 
