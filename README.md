@@ -1194,7 +1194,6 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
 The `source` object in [`client/state`](#client--server-clientstate) has this structure:
 
 - `source`: object
-  - `state`: 'idle' | 'streaming' - whether the source is currently capturing and sending audio
   - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
 
 ### Server → Client: `server/command` source object
@@ -1207,17 +1206,17 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls Sendspin ingest lifecycle for this source:
-  - `start`: server requests ingest to become active. The client SHOULD transition to `state: "streaming"`, send `input_stream/start`, and then send source audio chunks.
-  - `stop`: server requests ingest to become inactive. The client SHOULD send `input_stream/end`, stop sending source audio chunks, and transition to `state: "idle"`.
+  - `start`: server requests ingest to become active. The client SHOULD send `input_stream/start` and then send source audio chunks.
+  - `stop`: server requests ingest to become inactive. The client SHOULD send `input_stream/end` and stop sending source audio chunks.
 
 #### Default ingest behavior
 
 - Effective default after handshake is `stop` (ingest inactive).
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
 
-A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
+A source MAY also start ingest on its own without waiting for `command: "start"`: it sends `input_stream/start` and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
 
-A source MAY likewise stop on its own (e.g., the input goes silent): it sends `input_stream/end`, stops sending chunks, and reports `state: "idle"`.
+A source MAY likewise stop on its own (e.g., the input goes silent): it sends `input_stream/end` and stops sending chunks.
 
 When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `input_stream/end` and stops sending chunks.
 
