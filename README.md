@@ -1205,16 +1205,16 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 #### Source command semantics
 
-- `command` controls Sendspin ingest lifecycle for this source:
-  - `start`: server requests ingest to become active. The client SHOULD send `input_stream/start` and then send source audio chunks.
-  - `stop`: server requests ingest to become inactive. The client SHOULD send `input_stream/end` and stop sending source audio chunks.
+- `command` controls whether this source streams to the server:
+  - `start`: server requests the source to begin streaming. The client SHOULD send `input_stream/start` and then send source audio chunks.
+  - `stop`: server requests the source to stop streaming. The client SHOULD send `input_stream/end` and stop sending source audio chunks.
 
-#### Default ingest behavior
+#### Default streaming behavior
 
-- Effective default after handshake is `stop` (ingest inactive).
-- Server ingest interest is represented by `command: "start"` / `command: "stop"`.
+- Effective default after handshake is `stop` (not streaming).
+- The server signals whether it wants this source's audio with `command: "start"` / `command: "stop"`.
 
-A source MAY also start ingest on its own without waiting for `command: "start"`: it sends `input_stream/start` and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
+A source MAY also start streaming on its own without waiting for `command: "start"`: it sends `input_stream/start` and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
 
 A source MAY likewise stop on its own (e.g., the input goes silent): it sends `input_stream/end` and stops sending chunks.
 
