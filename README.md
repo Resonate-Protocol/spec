@@ -102,13 +102,9 @@ Unlike server-initiated connections, servers cannot reclaim clients by reconnect
 
 **Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
-While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
-
 ## Encryption
 
 All Sendspin connections use end-to-end encryption based on the [Noise Protocol Framework](https://noiseprotocol.org/noise.html). Encryption is mandatory for all connections established through the standard discovery mechanisms described in [Establishing a Connection](#establishing-a-connection).
-
-Specialized deployments where the connection is tunneled through a separately authenticated and encrypted channel may expose a non-standard endpoint that omits the Noise handshake; such endpoints must not be advertised via mDNS, and the operator is responsible for ensuring the tunnel provides equivalent security guarantees.
 
 ### Pattern
 
@@ -351,6 +347,10 @@ sequenceDiagram
         Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
+    alt Track jump (skip to different track)
+        Server->>Client: stream/clear (roles: [player, visualizer])
+    end
+
     alt Controller role
         Client->>Server: client/command (controller: play/pause/seek/volume/switch/etc)
     end
@@ -482,7 +482,7 @@ The activity sets the server may legitimately declare are constrained by which P
 
 **Note:** Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
-**Note:** When a `server/activate` removes a role from `active_roles`, the server first sends [`stream/end`](#server--client-streamend) for any stream that role still has open, so the client never holds a live stream for an inactive role.
+**Note:** When a `server/activate` removes a role from `active_roles`, the server first ends that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
 
 ### Client → Server: `client/time`
 
@@ -545,11 +545,11 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
+Only include fields that have changed. The client will merge these updates into existing state. A leaf field set to `null` should be cleared from the client's state; a whole role object set to `null` clears all of that role's state.
 
-- `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
-- `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
-- `color?`: object - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
+- `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
+- `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
+- `color?`: object | null - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -564,7 +564,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally — the default behavior is to not clear unless the implementation requires it. Implementations may document their specific behavior.
 
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
@@ -574,7 +574,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 ### Server → Client: `stream/clear`
 
-Instructs clients to clear buffers without ending the stream. Used for seek operations.
+Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
@@ -596,7 +596,13 @@ Response: [`stream/start`](#server--client-streamstart) for the requested role(s
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty. Specifically:
+
+- **Track transitions** (a track ends and the next begins naturally): no stream commands should be sent. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
+- **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
+- **Track jumps** (skipping to a different track): treat identically to a seek — send `stream/clear` instead of `stream/end`. Conceptually, the entire queue is a single continuous stream.
+
+Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
