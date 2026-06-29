@@ -1214,9 +1214,10 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 - Effective default after handshake is `stop` (ingest inactive).
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
-- Server implementations SHOULD ignore/drop source binary chunks while ingest is not active.
 
 A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
+
+A source MAY likewise stop on its own (e.g., the input goes silent): it sends `input_stream/end`, stops sending chunks, and reports `state: "idle"`.
 
 When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `input_stream/end` and stops sending chunks.
 
@@ -1237,7 +1238,7 @@ The client ends the current input stream. After this message, no more source aud
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if the source is not in `state: 'streaming'`.
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before an `input_stream/start` or after an `input_stream/end`).
 Clients MUST send `input_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
