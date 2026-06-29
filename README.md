@@ -538,7 +538,6 @@ If the client is already in a solo group:
 Client sends commands to the server. Contains command objects based on the client's supported roles.
 
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
-- `source?`: object - only if client has `source` role ([see source command object details](#client--server-clientcommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -1165,11 +1164,13 @@ Binary messages should be rejected if there is no active stream.
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`static_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
 
 ## Source messages
-This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (level or line sensing), and stream timestamped audio frames.
+This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
 
-A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). The server MAY also expose its own built-in inputs (e.g., a line-in on the server host, or an attached HDMI capture device) as a virtual source client that participates in the same state model as regular source clients.
+A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin).
 
-A source client uses the same clock synchronization mechanism as all clients. Binary source audio messages are timestamped in the server time domain using the clock offset learned from `client/time`/`server/time`.
+**Note:** The `source` role (capturing input *into* Sendspin) is distinct from the client-level [`state: 'external_source'`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
+
+A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. Binary source audio messages are timestamped in the server time domain by converting the local capture time with the offset the time filter tracks.
 
 **Pairing required:** A source streams captured audio (potentially from a microphone or line-in) to the server, so it MUST only run on a paired connection ([trust level](#definitions) `user`). Servers MUST NOT activate `source@v1` over [unpaired access](#unpaired-access), and a source client MUST refuse to stream when the connection's trust level is `none`.
 
@@ -1184,86 +1185,24 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24)
   - `features?`: object - optional feature hints
-    - `level?`: boolean - true if source reports `level`
     - `line_sense?`: boolean - true if source reports `signal`
 
 **Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
-
-**Note:** Servers SHOULD offer only the `supported_formats` options and avoid requesting unsupported formats.
-
-Example `client/hello` excerpt:
-```json
-{
-  "type": "client/hello",
-  "payload": {
-    "client_id": "kitchen-linein",
-    "name": "Kitchen Line-In",
-    "version": 1,
-    "supported_roles": ["source@v1"],
-    "source@v1_support": {
-      "supported_formats": [
-        {
-          "codec": "opus",
-          "channels": 2,
-          "sample_rate": 48000,
-          "bit_depth": 16
-        },
-        {
-          "codec": "pcm",
-          "channels": 2,
-          "sample_rate": 48000,
-          "bit_depth": 16
-        }
-      ],
-      "features": {
-        "line_sense": true,
-        "level": true
-      }
-    }
-  }
-}
-```
 
 ### Client → Server: `client/state` source object
 
 The `source` object in [`client/state`](#client--server-clientstate) has this structure:
 
 - `source`: object
-  - `state`: 'idle' | 'streaming' | 'error'
-  - `level?`: number - optional normalized RMS/peak level (0.0-1.0), only if 'level' is supported
+  - `state`: 'idle' | 'streaming' - whether the source is currently capturing and sending audio
   - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
-
-Example `client/state` excerpt:
-```json
-{
-  "type": "client/state",
-  "payload": {
-    "source": {
-      "state": "streaming",
-      "signal": "present",
-      "level": 0.42
-    }
-  }
-}
-```
-
-### Client → Server: `client/command` source object
-
-The `source` object in [`client/command`](#client--server-clientcommand) has this structure:
-
-Notifies the server of a capture change initiated at the source rather than by a server [`command`](#server--client-servercommand-source-object), so the server can apply its own ingest policy (for example, switching playback to a source that just started).
-
-- `source`: object
-  - `command`: 'started' | 'stopped'
-    - `started`: capture began at the source. A source that [starts ingest on its own](#default-ingest-behavior) SHOULD send this with its `input_stream/start`.
-    - `stopped`: capture ended at the source.
 
 ### Server → Client: `server/command` source object
 
 The `source` object in [`server/command`](#server--client-servercommand) has this structure:
 
 - `source`: object
-  - `command?`: 'start' | 'stop'
+  - `command`: 'start' | 'stop'
 
 #### Source command semantics
 
@@ -1277,19 +1216,9 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 - Server ingest interest is represented by `command: "start"` / `command: "stop"`.
 - Server implementations SHOULD ignore/drop source binary chunks while ingest is not active.
 
-A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
+A source MAY also start ingest on its own without waiting for `command: "start"`: it transitions to `state: "streaming"`, sends `input_stream/start`, and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
 
-Example `server/command` to start capture:
-```json
-{
-  "type": "server/command",
-  "payload": {
-    "source": {
-      "command": "start"
-    }
-  }
-}
-```
+When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `input_stream/end` and stops sending chunks.
 
 ### Client → Server: `input_stream/start`
 
@@ -1300,33 +1229,7 @@ The `input_stream/start` message announces the active input stream format and pr
   - `channels`: integer
   - `sample_rate`: integer
   - `bit_depth`: integer
-  - `codec_header?`: string - Base64 encoded codec header (REQUIRED for Opus/FLAC)
-
-Example `input_stream/start`:
-```json
-{
-  "type": "input_stream/start",
-  "payload": {
-    "source": {
-      "codec": "flac",
-      "channels": 2,
-      "sample_rate": 48000,
-      "bit_depth": 16,
-      "codec_header": "BASE64..."
-    }
-  }
-}
-```
-
-### Server → Client: `input_stream/request-format`
-
-The server MAY request a different input stream format. Clients SHOULD respond by reconfiguring capture (if supported) and sending a new `input_stream/start` with the updated format and header.
-
-- `source`: object
-  - `codec?`: 'opus' | 'flac' | 'pcm'
-  - `channels?`: integer
-  - `sample_rate?`: integer
-  - `bit_depth?`: integer
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
 ### Client → Server: `input_stream/end`
 
@@ -1343,7 +1246,9 @@ Clients MUST send `input_stream/start` before the first audio chunk.
 
 The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
-**Note:** Source timestamps are derived from the client's clock offset and may show small discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous.
+A device that implements both `source` and `player` MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
+
+**Note:** Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
