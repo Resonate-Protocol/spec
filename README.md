@@ -1211,12 +1211,9 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 #### Default streaming behavior
 
-- Effective default after handshake is `stop` (not streaming).
-- The server signals whether it wants this source's audio with `command: "start"` / `command: "stop"`.
+The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming.
 
-A source MAY also start streaming on its own without waiting for `command: "start"`: it sends `input_stream/start` and begins sending chunks. This lets a source that detects local signal (e.g., a turntable starting) begin streaming immediately, with no `signal`-to-`start` round trip. The server infers a source-initiated start from the `input_stream/start` it did not request, decides whether to route or drop the stream per its own policy, and a source MUST still honor a subsequent `command: "stop"`.
-
-A source MAY likewise stop on its own (e.g., the input goes silent): it sends `input_stream/end` and stops sending chunks.
+A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
 When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `input_stream/end` and stops sending chunks.
 
