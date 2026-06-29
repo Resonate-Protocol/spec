@@ -101,13 +101,9 @@ Unlike server-initiated connections, servers cannot reclaim clients by reconnect
 
 **Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
-While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
-
 ## Encryption
 
 All Sendspin connections use end-to-end encryption based on the [Noise Protocol Framework](https://noiseprotocol.org/noise.html). Encryption is mandatory for all connections established through the standard discovery mechanisms described in [Establishing a Connection](#establishing-a-connection).
-
-Specialized deployments where the connection is tunneled through a separately authenticated and encrypted channel may expose a non-standard endpoint that omits the Noise handshake; such endpoints must not be advertised via mDNS, and the operator is responsible for ensuring the tunnel provides equivalent security guarantees.
 
 ### Pattern
 
