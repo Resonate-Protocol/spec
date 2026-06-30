@@ -1110,6 +1110,8 @@ This section describes messages specific to clients with the `player` role, whic
 
 **Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Clients SHOULD convert volume to a linear amplitude (the gain applied to samples, where 1.0 is full scale and 0 is silent) as `amplitude = (volume / 100)^1.5`.
 
+**Note:** To avoid audible clicks, clients SHOULD apply volume changes over a short ramp.
+
 ### Client → Server: `client/hello` player@v1 support object
 
 The `player@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
