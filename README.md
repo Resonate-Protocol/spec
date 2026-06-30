@@ -631,7 +631,9 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-Response: [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
+Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new format.
+
+Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1172,7 +1174,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/start`](#server--client-streamstart) with the new format.
+Response when a `player` stream is active: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1356,7 +1358,7 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
+Response when an `artwork` stream is active: [`stream/start`](#server--client-streamstart) with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
@@ -1440,7 +1442,7 @@ The `visualizer` object in [`stream/request-format`](#client--server-streamreque
 
 All fields are optional; omitted fields keep their current value.
 
-Response: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
+Response when a `visualizer` stream is active: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
 
 ### Server → Client: `stream/clear` visualizer
 
