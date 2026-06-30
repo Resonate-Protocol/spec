@@ -547,7 +547,7 @@ Sent once the client is ready to report its operational `state`, and whenever an
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server. The server does not send timestamped binary data to a client until that client reports this state.
+  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server. The server MUST NOT send timestamped binary data to a client until that client reports this state.
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
