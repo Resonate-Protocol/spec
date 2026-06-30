@@ -199,12 +199,15 @@ Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) a
 
 All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
 
+**Forward compatibility.** Clients MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error.
+
 Message format example:
 
 ```json
 {
   "type": "stream/start",
   "payload": {
+    "server_transmitted": 1234567890,
     "player": {
       "codec": "opus",
       "sample_rate": 48000,
@@ -280,23 +283,66 @@ The concatenated `data` from all fragments yields the original message's payload
 
 ## Clock Synchronization
 
-Clients continuously send `client/time` messages to maintain an accurate offset from the server's clock. The frequency of these messages is determined by the client based on network conditions and clock stability.
+Clients send `client/time` messages to maintain an accurate offset from the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. See the time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section for a known-good burst-strategy baseline.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients must use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
+A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback.
+
 ## Playback Synchronization
 
-- Each client is responsible for maintaining synchronization with the server's timestamps
-- Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- When a client cannot maintain sync (e.g., buffer underrun), it should send `state: 'error'` via [`client/state`](#client--server-clientstate), mute its audio output, and continue buffering until it can resume synchronized playback, at which point it should send `state: 'synchronized'`
-- The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
-- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
-- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays
-- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
-- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback
-- Servers factor in each client's `static_delay_ms` when calculating how far ahead to send audio, keeping effective buffer headroom constant
+This section defines rules that require all implementations to provide a good experience, keeping playback seamlessly synchronized between speakers. While implementations can choose their own strategy, this section describes the minimal requirements that must be met by players. For a recommended strategy that is compliant, see the [Suggested correction strategy](#suggested-correction-strategy) subsection below.
+
+### Correction Quality
+
+- **Inaudible corrections:** In steady state, individual corrections MUST NOT produce audible noise, warble, or distortion during normal listening.
+- **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed, measured as a sliding average over 150 ms. This bounds continuous (steady-state) correction. A discrete one-shot resynchronization after a disturbance (startup, buffer underrun, or an error too large to correct smoothly) is not a speed deviation and is exempt; such events MUST be rare.
+
+### Sync Accuracy
+
+Sync accuracy is measured at the audio output, against what the time-filter predicts the local time should be (not against the true server clock). Use of the [time-filter](#clock-synchronization) is required to meet these minimum standards. The error is the absolute difference between when a sample actually plays in the client's local clock and the local time the time-filter predicts for that sample's server timestamp.
+
+Each client is responsible for maintaining its own synchronization with the server's timestamps.
+
+- **Accuracy floor:** In steady state, implementations MUST keep this error within ±1 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
+- **Accuracy target:** Implementations SHOULD aim for ±0.5 ms.
+- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
+
+### Startup Behavior
+
+- **No startup warble:** During startup, the client MUST NOT produce audible pitch modulation, warble, or other transient artifacts in the audio output.
+
+### Server Audio Send Constraints
+
+- **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
+- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
+- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)). For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- Servers factor in each client's [`static_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
+
+### Suggested correction strategy
+
+This is one valid correction strategy for clients with the `player` role: discrete sample deletion and insertion. It is an example, not a requirement. New implementers can use it as a starting point, especially where CPU or memory is limited: it needs no interpolation and leaves the audio bit-exact except at the moments it corrects.
+
+Other strategies are allowed and encouraged as long as they meet the rules in this section. For example, asynchronous sample-rate conversion (ASRC) continuously resamples the stream to track the clock, trading CPU/DSP load for lower steady-state distortion than discrete frame drops.
+
+#### Sample deletion and insertion
+
+The player renders decoded frames at their server timestamps translated to local time by the time-filter, and corrects accumulated drift by occasionally deleting or duplicating whole frames. At realistic clock drift these corrections are small and infrequent (a few per second) and individually inaudible. A "frame" is one sample across all channels (e.g. one stereo pair).
+
+**Soft correction.** Per decoded chunk:
+
+1. Measure the time error between when the chunk is scheduled to play (its server timestamp via the time-filter) and where the renderer will reach it in the output buffer.
+2. If the absolute error is below the dead band (~100 µs), output the chunk unchanged.
+3. Otherwise correct by `N` frames: if playback is running late (the chunk reaches the output after its scheduled local time), drop `N` frames to catch up; if running early, duplicate `N` frames to wait. Residual error beyond the step carries to the next chunk.
+
+**Choosing N.** Use the smallest `N` that keeps up with drift, scaled to hold the step duration constant across sample rates: `N = round(21 µs × sample_rate_hz / 1,000,000)` (N=1 at 44.1 and 48 kHz, 2 at 96 kHz, 4 at 192 kHz). A chunk's correction MUST NOT exceed the ±0.5% speed cap, so `N ≤ floor(0.005 × samples_in_chunk)`. Keep `N` small; at realistic drift any `N` in this range stays masked.
+
+**Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
+
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
 
 ```mermaid
 sequenceDiagram
@@ -309,15 +355,13 @@ sequenceDiagram
     Client->>Server: client/hello (roles and capabilities)
     Server->>Client: server/activate (activities, active_roles)
 
-    Client->>Server: client/state (state: synchronized)
-    alt Player role
-        Client->>Server: client/state (player: volume, muted)
-    end
-
     loop Continuous clock sync
         Client->>Server: client/time (client clock)
         Server->>Client: server/time (timing + offset info)
     end
+
+    Note over Client,Server: Clock synchronization established
+    Client->>Server: client/state (state: synchronized, player: volume, muted)
 
     alt Stream starts
         Server->>Client: stream/start (codec, format details)
@@ -505,13 +549,12 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent after the initial [`server/activate`](#server--client-serveractivate), and whenever any state changes thereafter. When a role becomes active in `active_roles`, send its full state.
+Sent once the client is ready to report its operational `state`, and whenever any state changes thereafter. A player reports `state: 'synchronized'` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send its full state.
 
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
-- `state`: 'synchronized' | 'error' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and synchronized with server timestamps
-  - `'error'` - client has a problem preventing normal operation (unable to keep up, clock sync issues, etc.)
+- `state`: 'synchronized' | 'external_source' - operational state of the client
+  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server.
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
@@ -566,6 +609,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally — the default behavior is to not clear unless the implementation requires it. Implementations may document their specific behavior.
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
@@ -576,6 +620,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -590,7 +635,9 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-Response: [`stream/start`](#server--client-streamstart) for the requested role(s) with the new format.
+Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new format.
+
+Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
 
 **Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -604,6 +651,7 @@ Ends the stream for one or more roles. When received, clients should stop output
 
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -1066,7 +1114,9 @@ The object always carries `free`; `capacity` and the costs appear additionally o
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
 
-**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Players must convert these values to appropriate amplitude for their audio hardware.
+**Note:** Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Clients SHOULD convert volume to a linear amplitude (the gain applied to samples, where 1.0 is full scale and 0 is silent) as `amplitude = (volume / 100)^1.5`.
+
+**Note:** To avoid audible clicks, clients SHOULD apply volume changes over a short ramp.
 
 ### Client → Server: `client/hello` player@v1 support object
 
@@ -1086,7 +1136,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 **Note:** [`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players should report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Both should factor in expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients). Do not include `static_delay_ms` in these values; the server applies `static_delay_ms` separately when calculating send-ahead.
 
 **Server behavior:**
-- For live/realtime sources, compute per-player send-ahead as `max(required_lead_time_ms, min_buffer_ms) + static_delay_ms`. The queue cannot grow after playback begins, so this single floor satisfies both startup lead (codec/DAC warmup) and the ongoing jitter buffer. For buffered sources (file playback, prefetched streams) where the queue grows past `min_buffer_ms` naturally once playback starts, servers MAY relax the startup floor to `required_lead_time_ms + static_delay_ms` to avoid paying the `min_buffer_ms` wait as pure startup latency. Source classification is server-side; the wire protocol does not signal it.
+- `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + static_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
 - For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
 - When the maximum decreases mid-stream (player leaves group, or updates timing), the server may keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
 - Especially for live streams, servers must schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
@@ -1108,7 +1158,7 @@ State updates must be sent whenever any state changes, including when the volume
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `static_delay_ms`: integer - static delay in milliseconds (0-5000), REQUIRED for players
-  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from server transmit time of the start/restart trigger ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
   - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players.
   - `supported_commands?`: string[] - subset of: 'set_static_delay'
 
@@ -1116,7 +1166,7 @@ State updates must be sent whenever any state changes, including when the volume
 
 **Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections. Clients may update `static_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
-**Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or on link-type change). Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
+**Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
 
 ### Client → Server: `stream/request-format` player object
 
@@ -1128,7 +1178,7 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
-Response: [`stream/start`](#server--client-streamstart) with the new format.
+Response when a `player` stream is active: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1161,7 +1211,7 @@ When [`stream/clear`](#server--client-streamclear) includes the player role, cli
 
 ### Server → Client: Audio Chunks (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
 
 - Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
@@ -1396,7 +1446,7 @@ The `artwork` object in [`stream/request-format`](#client--server-streamrequest-
 
 Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
 
-After receiving this message, the server responds with [`stream/start`](#server--client-streamstart) for the artwork role with the new format, followed by immediate artwork updates through binary messages.
+Response when an `artwork` stream is active: [`stream/start`](#server--client-streamstart) with the new format, followed by immediate artwork updates through binary messages.
 
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
@@ -1418,7 +1468,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 ### Server → Client: Artwork (Binary)
 
-Binary messages should be rejected if there is no active stream.
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
 
 - Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
@@ -1480,7 +1530,7 @@ The `visualizer` object in [`stream/request-format`](#client--server-streamreque
 
 All fields are optional; omitted fields keep their current value.
 
-Response: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
+Response when a `visualizer` stream is active: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
 
 ### Server → Client: `stream/clear` visualizer
 
@@ -1488,7 +1538,7 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages should be rejected if there is no active stream. Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
+Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
