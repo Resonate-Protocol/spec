@@ -300,8 +300,8 @@ Sync accuracy is measured at the audio output, against what the time-filter pred
 
 Each client is responsible for maintaining its own synchronization with the server's timestamps.
 
-- **Accuracy floor:** In steady state, implementations MUST keep this error within ±2 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
-- **Accuracy target:** Implementations SHOULD aim for ±1 ms.
+- **Accuracy floor:** In steady state, implementations MUST keep this error within ±1 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
+- **Accuracy target:** Implementations SHOULD aim for ±0.5 ms.
 - Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
 - Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
 
@@ -336,7 +336,7 @@ The player renders decoded frames at their server timestamps translated to local
 
 **Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
 
-**Large errors and startup.** When the error would otherwise exceed the ±2 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
 
 ```mermaid
 sequenceDiagram
