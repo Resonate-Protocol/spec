@@ -542,12 +542,12 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational `state`, and whenever any state changes thereafter. A player sends its first `client/state` only after it has established [clock synchronization](#clock-synchronization). When a role becomes active in `active_roles`, send its full state.
+Sent once the client is ready to report its operational `state`, and whenever any state changes thereafter. A player sends its first `client/state` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send its full state.
 
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server. The server MUST NOT send timestamped binary data to a client until that client reports this state.
+  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server.
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 
