@@ -204,6 +204,7 @@ Message format example:
 {
   "type": "stream/start",
   "payload": {
+    "server_transmitted": 1234567890,
     "player": {
       "codec": "opus",
       "sample_rate": 48000,
@@ -561,6 +562,7 @@ Server sends commands to the client. Contains role-specific command objects.
 
 Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally — the default behavior is to not clear unless the implementation requires it. Implementations may document their specific behavior.
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
@@ -571,6 +573,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -599,6 +602,7 @@ Ends the stream for one or more roles. When received, clients should stop output
 
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -1103,7 +1107,7 @@ State updates must be sent whenever any state changes, including when the volume
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `static_delay_ms`: integer - static delay in milliseconds (0-5000), REQUIRED for players
-  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from server transmit time of the start/restart trigger ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full.
   - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players.
   - `supported_commands?`: string[] - subset of: 'set_static_delay'
 
