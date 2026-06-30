@@ -14,6 +14,11 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
   - **Color** - receives colors derived from the current audio
 - **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
+- **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value of variable length (see [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)).
+- **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
 
 ## Role Versioning
 
@@ -27,7 +32,7 @@ All role names and versions not starting with `_` are reserved for future revisi
 
 Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
 
-The server activates one version per role family (e.g., one `player@vN`, one `controller@vN`)—the first match it implements from the client's list. The server reports activated roles in `active_roles`.
+The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
 
 Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
 
@@ -57,24 +62,26 @@ The server discovers available clients through mDNS and connects to each client 
 
 **Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
-#### Multiple Servers
+#### Multiple servers
 
-In environments with multiple Sendspin servers, servers may need to reconnect to clients when starting playback to reclaim them. The [`server/hello`](#server--client-serverhello) message includes a `connection_reason` field indicating whether the server is connecting for general availability (`'discovery'`) or for active/upcoming playback (`'playback'`).
+A client holds at most one admitted connection at a time, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
 
-Clients can only be connected to one server at a time. Clients must persistently store the `server_id` of the server that most recently had `playback_state: 'playing'` (the "last played server").
+- `'management'`
+- `'playback'`
+- `'pairing'`
 
-When a second server connects, clients must:
+A connection with empty `activities` ranks lowest.
 
-1. **Accept incoming connections**: Complete the handshake (send [`client/hello`](#client--server-clienthello), receive [`server/hello`](#server--client-serverhello)) with the new server before making any decisions.
+Clients must persistently store the `server_id` of the server that most recently held the admitted connection while `'playback'` was among its `activities` (the "last-playback server").
 
-2. **Decide which server to keep**:
-   - If the new server's `connection_reason` is `'playback'` → switch to new server
-   - If the new server's `connection_reason` is `'discovery'` and the existing server connected with `'playback'` → keep existing server
-   - If both servers have `connection_reason: 'discovery'`:
-     - Prefer the server matching the stored last played server
-     - If neither matches (or no history), keep the existing server
+When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
 
-3. **Disconnect**: Send [`client/goodbye`](#client--server-clientgoodbye) with reason `'another_server'` to the server being disconnected, then close the connection.
+- An in-flight pairing is not displaced by an incoming `'playback'` or `'pairing'` connection.
+- When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
+
+Subsequent `server/activate` updates do not trigger arbitration. A provisional connection that has not sent `server/activate` within 30 seconds is dropped.
+
+A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
 ### Client Initiated Connections
 
@@ -88,22 +95,104 @@ Clients discover the server through mDNS and initiate a WebSocket connection usi
 
 **Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
-#### Multiple Servers
+#### Multiple servers
 
 Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
 **Note:** After this point, Sendspin works independently of how the connection was established. The Sendspin client is always the consumer of data like audio or metadata, regardless of who initiated the connection.
 
-While custom connection methods are possible for specialized use cases (like remotely accessible web-browsers, mobile apps), most clients should use one of the two standardized methods above if possible.
+## Encryption
+
+All Sendspin connections use end-to-end encryption based on the [Noise Protocol Framework](https://noiseprotocol.org/noise.html). Encryption is mandatory for all connections established through the standard discovery mechanisms described in [Establishing a Connection](#establishing-a-connection).
+
+### Pattern
+
+Sendspin uses the `KKpsk2` Noise pattern. Both static keys are pre-known to both parties (the `client_id` of the client and the `server_id` of the server are the static public keys), and a [Pre-Shared Key](#pre-shared-key) is mixed in at the end of the handshake's second message.
+
+The **server is the Noise initiator**, the **client is the Noise responder**, regardless of which side initiated the WebSocket connection.
+
+**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions. Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
+
+### Cipher Suites
+
+A suite specifies the `<DH>_<cipher>_<hash>` part of the full Noise protocol name. Sendspin defines two:
+
+- `25519_ChaChaPoly_SHA256` - software-friendly suite
+- `25519_AESGCM_SHA256` - hardware-accelerated suite (AES-NI / ARMv8 Crypto Extensions)
+
+Servers must support both suites. Clients must support at least one.
+
+The client picks one suite and announces it in [`client/init`](#client--server-clientinit); since servers are required to support every suite, no negotiation is needed.
+
+### Identities
+
+The `client_id` and `server_id` fields are the base64url-encoded (no padding) Curve25519 public keys of the client and server respectively, 43 characters each. These keys serve both as routing/persistence identifiers and as the static keys used in the Noise handshake.
+
+**Key rotation.** Each side's static keypair is intended to be long-lived; the identifier is the pubkey, so rotating the keypair changes the identity. A server that rotates its static keypair (e.g., reprovisioned hardware, migrated host, lost private key) appears to clients as a different server. Operators who want to preserve identity across server moves must preserve the server's static private key (e.g., as part of the server's backup/restore set).
+
+### Pre-Shared Key
+
+The PSK is mixed into the handshake state at the end of the second handshake message (the `psk2` modifier). The transport-mode keys derived after the handshake therefore include the PSK, but the first handshake message's payload (sent by the server) is encrypted under static-key DH only.
+
+To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
+
+```
+psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
+```
+
+The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, Pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+
+The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
+
+```
+Sentinel PSK = SHA-256("sendspin-sentinel-psk-v1")
+             = 0x1b5e24dbc1aed95fc2a5a338a90c05df44bd10f5ec1f4cd66cbf86272767b9d3
+```
+
+and its `psk_id` is therefore also a published constant:
+
+```
+Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7ce8a
+                = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
+```
+
+The client decrypts the first handshake message's payload using only the static keys, compares the included `psk_id` to hashes of each of its candidate PSKs, and selects the PSK whose hash matches. It then mixes that PSK as required to process the second handshake message. If no candidate matches, the handshake fails.
+
+Two storage variants are supported for long-term [Sendspin PSK](#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
+
+- **Stored-pubkey model**: each long-term PSK is persisted alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
+- **Shared-PSK model**: PSKs are persisted without an associated `server_id`; the `server_id` from [`server/init`](#server--client-serverinit) is accepted at face value. Convenient for storage-constrained clients, but with weaker security properties - multiple servers may share the same PSK.
+
+### Prologue
+
+The prologue mixed into the Noise handshake state on both sides is the concatenation of the exact bytes of [`client/init`](#client--server-clientinit) followed by the exact bytes of [`server/init`](#server--client-serverinit), as transmitted on the wire (the JSON-encoded UTF-8 message body, without the WebSocket framing). This binds the cleartext init exchange to the handshake; tampering causes the handshake to fail.
+
+### Failure Handling
+
+Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+
+### Re-handshake
+
+The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust class after a successful [pairing](#pairing), to switch from Sentinel to a Pairing PSK, or to rotate session keys on long-running connections.
+
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) (the client re-asserts `trust_level`) → [`server/activate`](#server--client-serveractivate).
 
 ## Communication
 
-Once the connection is established, Client and Server are going to talk.
+Once the WebSocket connection is established, Client and Server perform an initial handshake before exchanging application data:
 
-The first message must always be a `client/hello` message from the client to the server.
-Once the server receives this message, it responds with a `server/hello` message. Before this handshake is complete, no other messages should be sent.
+1. Client → Server: [`client/init`](#client--server-clientinit) (cleartext)
+2. Server → Client: [`server/init`](#server--client-serverinit) (cleartext)
+3. Server → Client: [`noise/handshake`](#client--server-noisehandshake) - Noise message 1 (cleartext)
+4. Client → Server: [`noise/handshake`](#client--server-noisehandshake) - Noise message 2 (cleartext)
+5. Both sides switch to Noise transport mode. From this point, all WebSocket frames are binary, and all payloads are Noise transport ciphertexts.
+6. Server → Client: [`server/hello`](#server--client-serverhello) (encrypted)
+7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
+8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
-WebSocket text messages are used to send JSON payloads.
+No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives. See [Encryption](#encryption) for cryptographic details.
+
+Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are sent as WebSocket **text** frames containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** frames carrying Noise transport ciphertexts.
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
@@ -115,6 +204,7 @@ Message format example:
 {
   "type": "stream/start",
   "payload": {
+    "server_transmitted": 1234567890,
     "player": {
       "codec": "opus",
       "sample_rate": 48000,
@@ -135,14 +225,16 @@ Message format example:
 }
 ```
 
-WebSocket binary messages are used to send audio chunks, media art, and visualization data. The first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
+WebSocket binary messages are used to send JSON payloads, audio chunks, media art, and visualization data. Each binary message is a Noise transport ciphertext; after AEAD decryption, the first byte is a uint8 representing the message type. Throughout this specification, bit 0 refers to the least significant bit.
 
 ### Binary Message ID Structure
 
 Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
 
 **Role assignments:**
-- `000000xx` (0-3): Reserved for future use
+- `00000000` (0): JSON message body (UTF-8)
+- `00000001` (1): Reserved for future use
+- `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
 - `000011xx` (12-15): Reserved for a future role
@@ -160,38 +252,103 @@ Roles with expanded allocations have slots 0-7.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
+### Fragmentation
+
+A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message types.
+
+**Wire format** (inside the AEAD-protected plaintext of each fragment frame):
+
+A fragmented message consists of an opening fragment-more frame (carrying `orig_type`), zero or more continuation fragment-more frames, and a closing fragment-end frame. The minimum is one fragment-more frame followed by one fragment-end frame.
+
+Bit 0 is the last-fragment flag: `00000010` (2) is a fragment-more frame, `00000011` (3) is a fragment-end frame.
+
+- Fragment-more (type `2`):
+  - First fragment of a fragmented message: `[2][orig_type][data]`
+  - Subsequent non-final fragments: `[2][data]`
+- Fragment-end (type `3`): `[3][data]`
+
+The format of a type `2` frame depends on the receiver's state: when no fragmented message is in flight, a type `2` frame begins a new one and carries `orig_type`; when a fragmented message is already in flight, a type `2` frame is a continuation and carries only `data`.
+
+The concatenated `data` from all fragments yields the original message's payload (the bytes that would have followed the message type byte in a non-fragmented message of type `orig_type`).
+
+**Constraints:**
+
+- Only one message may be in flight at a time across the entire connection. If a message is fragmented, the sender must finish sending it (with a fragment-end frame) before starting another.
+- Senders should not fragment messages that fit in a single non-fragmented frame.
+
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a fragment-more frame when no message is in flight, read `orig_type` from byte 1, then start a new buffer with the rest of the frame. On a fragment-more frame when a message is in flight, append the frame's data to the buffer. On a fragment-end frame, append the frame's data and dispatch the result as a single message of type `orig_type`, then clear the buffer.
+
 ## Clock Synchronization
 
-Clients continuously send `client/time` messages to maintain an accurate offset from the server's clock. The frequency of these messages is determined by the client based on network conditions and clock stability.
+Clients send `client/time` messages to maintain an accurate offset from the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. See the time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section for a known-good burst-strategy baseline.
 
-Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients must use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
+Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
 ## Playback Synchronization
 
-- Each client is responsible for maintaining synchronization with the server's timestamps
-- Clients maintain accurate sync by adding or removing samples using interpolation to compensate for clock drift
-- On connect a client reports `state: 'not_synchronized'` via [`client/state`](#client--server-clientstate), then `state: 'synchronized'` once clock synchronization is established. The server MUST NOT send binary messages to a client unless it is in the `synchronized` state
-- A buffer underrun does not change `state`; the client SHOULD mute output and continue buffering until it can resume synchronized playback
-- The server is unaware of individual client synchronization accuracy - it simply broadcasts timestamped audio
-- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients
-- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays
-- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync
-- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback
-- Servers factor in each client's `static_delay_ms` when calculating how far ahead to send audio, keeping effective buffer headroom constant
+This section defines rules that require all implementations to provide a good experience, keeping playback seamlessly synchronized between speakers. While implementations can choose their own strategy, this section describes the minimal requirements that must be met by players. For a recommended strategy that is compliant, see the [Suggested correction strategy](#suggested-correction-strategy) subsection below.
+
+### Correction Quality
+
+- **Inaudible corrections:** In steady state, individual corrections MUST NOT produce audible noise, warble, or distortion during normal listening.
+- **Maximum speed deviation:** The effective playback speed MUST stay within ±0.5% of normal speed, measured as a sliding average over 150 ms. This bounds continuous (steady-state) correction. A discrete one-shot resynchronization after a disturbance (startup, buffer underrun, or an error too large to correct smoothly) is not a speed deviation and is exempt; such events MUST be rare.
+
+### Sync Accuracy
+
+Sync accuracy is measured at the audio output, against what the time-filter predicts the local time should be (not against the true server clock). Use of the [time-filter](#clock-synchronization) is required to meet these minimum standards. The error is the absolute difference between when a sample actually plays in the client's local clock and the local time the time-filter predicts for that sample's server timestamp.
+
+Each client is responsible for maintaining its own synchronization with the server's timestamps.
+
+- **Accuracy floor:** In steady state, implementations MUST keep this error within ±1 ms. The only exception is the one-shot resynchronization exempted from the speed cap above, which MUST be rare.
+- **Accuracy target:** Implementations SHOULD aim for ±0.5 ms.
+- Clients subtract their [`static_delay_ms`](#client--server-clientstate-player-object) from server timestamps before scheduling playback.
+- Audio chunks may arrive with timestamps in the past due to network delays or buffering; clients should drop these late chunks to maintain sync.
+
+### Startup Behavior
+
+- **No startup warble:** During startup, the client MUST NOT produce audible pitch modulation, warble, or other transient artifacts in the audio output.
+
+### Server Audio Send Constraints
+
+- **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
+- The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
+- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's [`required_lead_time_ms`](#client--server-clientstate-player-object) (startup warmup) and [`min_buffer_ms`](#client--server-clientstate-player-object) (ongoing jitter buffer). For live streams the buffer cannot grow after playback begins, so the larger of the two must already be reached before the first chunk plays.
+- Servers factor in each client's [`static_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
+
+### Suggested correction strategy
+
+This is one valid correction strategy for clients with the `player` role: discrete sample deletion and insertion. It is an example, not a requirement. New implementers can use it as a starting point, especially where CPU or memory is limited: it needs no interpolation and leaves the audio bit-exact except at the moments it corrects.
+
+Other strategies are allowed and encouraged as long as they meet the rules in this section. For example, asynchronous sample-rate conversion (ASRC) continuously resamples the stream to track the clock, trading CPU/DSP load for lower steady-state distortion than discrete frame drops.
+
+#### Sample deletion and insertion
+
+The player renders decoded frames at their server timestamps translated to local time by the time-filter, and corrects accumulated drift by occasionally deleting or duplicating whole frames. At realistic clock drift these corrections are small and infrequent (a few per second) and individually inaudible. A "frame" is one sample across all channels (e.g. one stereo pair).
+
+**Soft correction.** Per decoded chunk:
+
+1. Measure the time error between when the chunk is scheduled to play (its server timestamp via the time-filter) and where the renderer will reach it in the output buffer.
+2. If the absolute error is below the dead band (~100 µs), output the chunk unchanged.
+3. Otherwise correct by `N` frames: if playback is running late (the chunk reaches the output after its scheduled local time), drop `N` frames to catch up; if running early, duplicate `N` frames to wait. Residual error beyond the step carries to the next chunk.
+
+**Choosing N.** Use the smallest `N` that keeps up with drift, scaled to hold the step duration constant across sample rates: `N = round(21 µs × sample_rate_hz / 1,000,000)` (N=1 at 44.1 and 48 kHz, 2 at 96 kHz, 4 at 192 kHz). A chunk's correction MUST NOT exceed the ±0.5% speed cap, so `N ≤ floor(0.005 × samples_in_chunk)`. Keep `N` small; at realistic drift any `N` in this range stays masked.
+
+**Drop** removes the `N` frames and lets the neighbouring frames abut. **Duplicate** repeats a boundary frame `N` times. The output is the original samples with `N` removed or `N` repeated, bit-exact everywhere else.
+
+**Large errors and startup.** When the error would otherwise exceed the ±1 ms floor, or on startup, [`stream/start`](#server--client-streamstart), [`stream/clear`](#server--client-streamclear), or recovery from underrun, snap to the correct position in one shot instead of soft-correcting: if playback is late, drop a leading prefix equal to the excess; if early, insert silence of the equivalent duration. This is a deliberate discontinuity and MUST be rare.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: WebSocket connection established
+    Note over Client,Server: Noise handshake complete (see Communication)
 
-    Note over Client,Server: Text messages = JSON payloads, Binary messages = Audio/Art/Visualization
-
+    Server->>Client: server/hello (name)
     Client->>Server: client/hello (roles and capabilities)
-    Server->>Client: server/hello (server info, connection_reason)
+    Server->>Client: server/activate (activities, active_roles)
 
     Client->>Server: client/state (state: not_synchronized)
     alt Player role
@@ -234,8 +391,12 @@ sequenceDiagram
         Server->>Client: stream/clear (roles: [player, visualizer])
     end
 
+    alt Track jump (skip to different track)
+        Server->>Client: stream/clear (roles: [player, visualizer])
+    end
+
     alt Controller role
-        Client->>Server: client/command (controller: play/pause/volume/switch/etc)
+        Client->>Server: client/command (controller: play/pause/seek/volume/switch/etc)
     end
 
     alt State changes
@@ -259,21 +420,60 @@ This section describes the fundamental messages that establish communication bet
 
 Every Sendspin client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
+[Management](#management) messages are likewise required for all clients and servers. [Pairing](#pairing) messages are required for all servers; clients implement the subset matching their advertised pairing methods.
+
+### Client → Server: `client/init`
+
+First message sent by the client after the WebSocket connection is established. Contains information necessary for conducting the Noise handshake.
+
+- `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](#identities). Persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
+- `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
+- `suite`: string - Noise cipher suite the client picked for this connection. See [Cipher Suites](#cipher-suites)
+
+### Server → Client: `server/init`
+
+Response to the [`client/init`](#client--server-clientinit) message with corresponding information about the server.
+
+The server sends `server/init` immediately followed by the first [`noise/handshake`](#client--server-noisehandshake) message (Noise message 1) without waiting for any client message in between.
+
+- `server_id`: string - server's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](#identities)
+- `version`: integer (must be `1`) - version of the core message format that the server implements (independent of role versions)
+
+### Client ↔ Server: `noise/handshake`
+
+Carries one Noise handshake message. Sent twice during the handshake: once by the server (Noise message 1, sent immediately after [`server/init`](#server--client-serverinit)), and once by the client in response (Noise message 2).
+
+- `data`: string - base64url-encoded Noise handshake message bytes (no padding)
+
+The encrypted payload carried inside each Noise handshake message is a UTF-8 JSON object:
+
+- **Noise message 1 payload** (server → client): 
+  - `psk_id`: string - 43-character base64url-encoded SHA-256 hash derived from the PSK. Used by the client to select the PSK before processing message 2. See [Pre-Shared Key](#pre-shared-key).
+- **Noise message 2 payload** (client → server): empty object `{}`
+
+After both handshake messages have been exchanged, both sides switch to Noise transport mode. All subsequent WebSocket frames are binary, and all payloads are Noise transport ciphertexts.
+
+The same `noise/handshake` message is used for the in-band [re-handshake](#re-handshake): the two messages then travel as binary frames encrypted under the current transport keys rather than as cleartext text frames.
+
+### Server → Client: `server/hello`
+
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`). This message will be followed by a [`client/hello`](#client--server-clienthello) message from the client.
+
+- `name`: string - friendly name of the server
+
 ### Client → Server: `client/hello`
 
-First message sent by the client after establishing the WebSocket connection. Contains information about the client's capabilities and roles.
-This message will be followed by a [`server/hello`](#server--client-serverhello) message from the server.
+Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
 
 Players that can output audio should have the role `player`.
 
-- `client_id`: string - uniquely identifies the client for groups and de-duplication. Should remain persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
 - `name`: string - friendly name of the client
 - `device_info?`: object - optional information about the device
   - `product_name?`: string - device model/product name
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
   - `mac_address?`: string - MAC address of the network interface the connection is opened on, in lowercase colon-separated form (e.g., `aa:bb:cc:dd:ee:ff`)
-- `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
+- `trust_level`: 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which operations the server may issue. `'user'` reflects a pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
   - `controller@v1` - controls the current Sendspin group
@@ -284,8 +484,47 @@ Players that can output audio should have the role `player`.
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
+- `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor).
+- `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
+  - `enabled`: boolean
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
+
+### Server → Client: `server/activate`
+
+Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
+
+Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
+
+- `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
+- `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below).
+- `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise.
+
+The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
+
+| PSK matched | Allowed activity sets |
+|---|---|
+| [Sendspin PSK](#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` |
+| [Sendspin Pairing PSK](#definitions) | `['pairing']` |
+| [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
+
+¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](#unpaired-access) enabled.
+
+`selected_pair_method` MUST be `'pairing_psk'` if and only if the matched PSK is the [Sendspin Pairing PSK](#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
+
+**Playback-capable connections.** A connection is *playback-capable* when its `activities` extended with `'playback'` are an allowed set for the matched PSK; a connection already declaring `'playback'` is therefore playback-capable exactly when its `activities` are an allowed set. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`.
+
+`server/activate` is *admissible* when it satisfies the constraints above. When one is not admissible, the client closes the connection, selecting the reason by the first rule that applies:
+
+- If the matched PSK is the [Sentinel PSK](#pre-shared-key), the client does not have [unpaired access](#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
+- If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `'pairing'` is in `activities` with a `selected_pair_method` the matched PSK disallows or the client did not offer - close with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
+
+**Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers)), so keeping an unused activity declared would degrade multi-server cooperation.
+
+**Note:** Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
+
+**Note:** When a `server/activate` removes a role from `active_roles`, the server first ends that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
 
 ### Client → Server: `client/time`
 
@@ -293,22 +532,6 @@ Sends current internal clock timestamp (in microseconds) to the server.
 Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
 
 - `client_transmitted`: integer - client's internal clock timestamp in microseconds
-
-### Server → Client: `server/hello`
-
-Response to the [`client/hello`](#client--server-clienthello) message with information about the server.
-
-Only after receiving this message should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
-
-- `server_id`: string - identifier of the server
-- `name`: string - friendly name of the server
-- `version`: integer (must be `1`) - version of the core message format that the server implements (independent of role versions)
-- `active_roles`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`)
-- `connection_reason`: 'discovery' | 'playback' - only used for [server-initiated connections](#multiple-servers)
-  - `discovery` - server is connecting for general availability (e.g., initial discovery, reconnection after connection loss)
-  - `playback` - server needs client for active or upcoming playback
-
-**Note:** Servers will always activate the client's [preferred](#priority-and-activation) version of each role. Checking `active_roles` is only necessary to detect outdated servers or confirm activation of [application-specific roles](#application-specific-roles).
 
 ### Server → Client: `server/time`
 
@@ -324,9 +547,9 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Must be sent immediately after receiving [`server/hello`](#server--client-serverhello), and whenever any state changes thereafter.
+Must be sent after the initial [`server/activate`](#server--client-serveractivate), and whenever any state changes thereafter. When a role becomes active in `active_roles`, send its full state.
 
-For the initial message, include all state fields. For subsequent updates, only include fields that have changed. The server will merge these updates into existing state.
+The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'not_synchronized' | 'external_source' - operational state of the client
   - `'synchronized'` - client's clock is synchronized with the server; ready to receive timestamped binary data
@@ -363,11 +586,11 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Only include fields that have changed. The client will merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
+Only include fields that have changed. The client will merge these updates into existing state. A leaf field set to `null` should be cleared from the client's state; a whole role object set to `null` clears all of that role's state.
 
-- `metadata?`: object - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
-- `controller?`: object - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
-- `color?`: object - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
+- `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
+- `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
+- `color?`: object | null - only sent to clients with `color` role ([see color state object details](#server--client-serverstate-color-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -381,8 +604,9 @@ Server sends commands to the client. Contains role-specific command objects.
 
 ### Server → Client: `stream/start`
 
-Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers.
+Starts a stream for one or more roles. If sent for a role that already has an active stream, updates the stream configuration without clearing buffers. If a parameter change requires rebuffering (e.g., a sample rate change), the receiver handles this internally — the default behavior is to not clear unless the implementation requires it. Implementations may document their specific behavior.
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
@@ -391,8 +615,9 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 ### Server → Client: `stream/clear`
 
-Instructs clients to clear buffers without ending the stream. Used for seek operations.
+Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -413,8 +638,15 @@ Response: [`stream/start`](#server--client-streamstart) for the requested role(s
 
 ### Server → Client: `stream/end`
 
-Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles.
+Ends the stream for one or more roles. When received, clients should stop output and clear buffers for the specified roles. This message is expected to be sent when playback is over and the queue is empty. Specifically:
 
+- **Track transitions** (a track ends and the next begins naturally): no stream commands should be sent. The stream continues uninterrupted to support gapless playback and server-inserted crossfade.
+- **Seeks** (jumping to a position within the current track): send `stream/clear` instead.
+- **Track jumps** (skipping to a different track): treat identically to a seek — send `stream/clear` instead of `stream/end`. Conceptually, the entire queue is a single continuous stream.
+
+Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
+
+- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -429,19 +661,450 @@ Contains delta updates with only the changed fields. The client should merge the
 - `group_id?`: string - group identifier
 - `group_name?`: string - friendly name of the group
 
+### Server → Client: `server/unpair`
+
+Sent by a paired server to drop its own pairing record from the client. Valid at any time regardless of the current `activities`; does not require `'management'` in the activity set. No payload fields.
+
+Client behavior:
+
+- Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
+- If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](#server--client-managementremove-record).
+- If the connection's `trust_level` is `'none'` (e.g., an in-flight pairing handshake), ignore the message and continue unchanged.
+
 ### Client → Server: `client/goodbye`
 
 Sent by the client before gracefully closing the connection. This allows the client to inform the server why it is disconnecting.
 
 Upon receiving this message, the server should initiate the disconnect.
 
-- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request'
+- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different Sendspin server. Server should not auto-reconnect but should show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
+  - `unauthorized` - the client refused the connection because the server declared an activity set it is not authorized for (e.g., `'management'` without `'user'` [trust level](#definitions)). Server should not auto-reconnect with the same activity set
+  - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
+  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
+  - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
-**Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
+**Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
+
+- On a connection whose `activities` are empty, or include `'playback'`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
+- Otherwise, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
+- Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops when a long-term PSK has become invalid (e.g., after a client factory reset).
+
+## Pairing
+
+Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered `long_term_psk`, bringing the channel under the new trust ceiling without closing the WebSocket.
+
+This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement either or both PIN methods.
+
+### Methods
+
+1. **Pairing PSK** - pairing authenticated by a [Sendspin Pairing PSK](#definitions); no PAKE round, no PIN. See [Pairing PSK Flow](#pairing-psk-flow).
+2. **Dynamic PIN** - pairing with a per-session [Sendspin Pairing PIN](#definitions); the client derives the PIN from a commit-and-reveal binding to the Noise handshake and emits it via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
+3. **Static PIN** - pairing with a fixed [Sendspin Pairing PIN](#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the PIN is disclosed. See [Static PIN Pairing Flow](#static-pin-pairing-flow).
+
+Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers)); the operator must stop playback before initiating pairing.
+
+Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
+
+### Entering and leaving pairing
+
+Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces it exactly as an [`external_source`](#external-source-handling) transition does, and sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`.
+
+The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
+
+The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received `long_term_psk`. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
+
+### Unpaired Access
+
+A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below. The default is the manufacturer's choice. The client's toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and its current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`. Servers must likewise allow their operator to enable or disable offering unpaired access; the offer is conveyed to the client through [`active_roles`](#server--client-serveractivate), not a separate flag.
+
+**Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and in the unpaired case neither peer's static key is bound to its identity by any authenticated out-of-band exchange; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
+
+### Pairing PSK Flow
+
+The Noise handshake completes using the Pairing PSK, authenticating both sides. The client proceeds straight to [`client/pair-finalize`](#client--server-clientpair-finalize).
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Note over Client,Server: Noise handshake completes with Pairing PSK
+
+    Server->>Client: server/hello (name)
+    Client->>Server: client/hello (supported_pair_methods)
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=pairing_psk)
+    Client->>Server: client/pair-finalize (long_term_psk)
+    Server->>Client: server/pair-finalize
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+```
+
+If a Sentinel-keyed connection is already open when the operator picks `pairing_psk`, the server first [re-handshakes](#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
+
+### Dynamic PIN Pairing Flow
+
+Pairing with a per-session PIN derived from the Noise handshake and emitted by the client via its out-channel. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Note over Client,Server: Noise handshake completes with Sentinel PSK
+
+    Server->>Client: server/hello (name)
+    Client->>Server: client/hello (supported_pair_methods)
+    Note over Server: Operator picks dynamic PIN
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=dynamic_pin)
+    Client->>Server: client/pair-init (commit_B)
+    Server->>Client: server/pair-init (nonce_A)
+    Note over Client: Derive PIN from (h, nonce_B, nonce_A), emit via out-channel
+    Note over Server: Operator enters PIN
+    Server->>Client: server/pair-auth (pake_msg_1)
+    Client->>Server: client/pair-auth (pake_msg_2)
+    Server->>Client: server/pair-confirm (server_kc)
+    Note over Client: Verify server_kc
+    Client->>Server: client/pair-confirm (client_kc, nonce_B)
+    Note over Server: Verify client_kc, commit opening, and PIN binding
+    Note over Client: Sent back-to-back, no server response awaited
+    Client->>Server: client/pair-finalize (long_term_psk)
+    Server->>Client: server/pair-finalize
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+```
+
+**Binding values.** The dynamic PIN flow introduces three values across two messages that bind the PIN to the underlying Noise handshake:
+
+- `nonce_A` - 32 bytes drawn from a CSPRNG by the server, sent in [`server/pair-init`](#server--client-serverpair-init), base64url-encoded (43 chars).
+- `nonce_B` - 32 bytes drawn from a CSPRNG by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it (base64url-encoded, 43 chars).
+- `commit_B` - `SHA-256(nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the PIN derivation.
+
+**PIN length.** The digit count `L` is determined per pairing session as the larger of the two sides' minimums: `L = max(client_min, server_min)`, clamped to 4–12, where `client_min` is `min_pin_length` from the client's [`dynamic_pin` descriptor](#client--server-clienthello-pair-method-descriptor) and `server_min` is the server's operator-configured minimum. The server computes it and sends it as `pin_length` in [`server/pair-init`](#server--client-serverpair-init). The client rejects a `pin_length` outside `[min_pin_length, 12]` with [`pair/abort`](#client--server-pairabort) reason `pin_length_unacceptable`.
+
+**PIN derivation.** Once the client has received `nonce_A` and `pin_length`, both sides can derive the same PIN from the Noise handshake hash `h`, the two nonces, and the chosen length `L`:
+
+```
+digest  = SHA-256("sendspin-pin-derive-v1" || h || nonce_A || nonce_B)
+PIN_int = uint256_be(digest) mod 10^L
+PIN     = decimal(PIN_int) zero-padded to L digits
+```
+
+The hash input is the UTF-8 bytes of the literal label `"sendspin-pin-derive-v1"` (no separator, no NUL terminator) followed by `h` (32 bytes, raw), `nonce_A` (32 bytes, raw), and `nonce_B` (32 bytes, raw). The full 32-byte SHA-256 output is interpreted as an unsigned big-endian 256-bit integer; the PIN is its value modulo 10^L, zero-padded on the left to exactly `L` ASCII digits. The PIN bytes fed into CPace as `PRS` are these `L` ASCII digits - the same per-digit encoding as the static PIN.
+
+**Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
+
+**Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies, in this order:
+
+1. CPace MCF tag `client_kc`
+2. `SHA-256(nonce_B) == commit_B`
+3. `derived_PIN(h, nonce_B, nonce_A) == PIN_typed`
+
+All three checks must pass before the server processes [`client/pair-finalize`](#client--server-clientpair-finalize) and persists the pairing record. Any failure results in [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discard of the received `long_term_psk`.
+
+**Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
+
+**Device-presence verification.** When the server [leaves pairing](#entering-and-leaving-pairing) instead of finalizing, this flow doubles as a device-presence verification: the PIN is emitted through the device's own out-channel, so a successful round confirms the device on the connection is the one the operator is observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
+
+### Static PIN Pairing Flow
+
+Pairing with a fixed PIN. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. Each attempt is gated by a [pairing window](#pairing-window) opened by an operator gesture on the client.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Note over Client,Server: Noise handshake completes (Sentinel PSK)
+
+    Server->>Client: server/hello (name)
+    Client->>Server: client/hello (supported_pair_methods)
+    Note over Server: Operator picks static PIN
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=static_pin)
+    Note over Client: Wait for operator to open pairing window
+    Client->>Server: client/pair-init
+    Note over Server: Operator enters static PIN
+    Server->>Client: server/pair-auth (pake_msg_1)
+    Client->>Server: client/pair-auth (pake_msg_2)
+    Server->>Client: server/pair-confirm (server_kc)
+    Note over Client: Verify server_kc
+    Client->>Server: client/pair-confirm (client_kc)
+    Note over Server: Verify client_kc
+    Note over Client: Sent back-to-back, no server response awaited
+    Client->>Server: client/pair-finalize (long_term_psk)
+    Server->>Client: server/pair-finalize
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+```
+
+**Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
+
+**Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies the CPace MCF tag `client_kc` before processing [`client/pair-finalize`](#client--server-clientpair-finalize). On failure the server sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discards the received `long_term_psk`.
+
+**Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
+
+#### Pairing window
+
+Static PIN pairing gates each attempt on a **pairing window**: a state in which the client has decided to accept one pairing attempt. The window admits exactly one attempt and closes on completion, inner-authentication failure, [`pair/abort`](#client--server-pairabort), connection drop, operator cancellation, window-lifetime expiry, or attempt-timeout expiry.
+
+- **Opening the window.** An operator gesture on the client opens the window: a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action.
+- **Window lifetime.** From window opening until [`client/pair-init`](#client--server-clientpair-init) is sent. Recommended 5 minutes. On expiry, the window closes silently. A subsequent attempt requires a fresh gesture.
+- **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
+
+### PAKE
+
+The PIN pairing flows use **CPACE-X25519-SHA512** as the PAKE construction, defined in [draft-irtf-cfrg-cpace](https://datatracker.ietf.org/doc/draft-irtf-cfrg-cpace/). The protocol runs in initiator-responder mode with explicit Mutual Confirmation Flow (MCF). The server takes role `A` (initiator); the client takes role `B` (responder).
+
+Sendspin instantiates CPace's inputs as follows:
+
+- `PRS` - the PIN as a UTF-8 byte string (the literal decimal digits - e.g., `0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38` for the PIN `"12345678"`).
+- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` concatenated with the Noise handshake hash `h` available immediately after Noise transport mode begins.
+- `CI` - empty.
+- `ADa`, `ADb` - empty.
+
+The four pairing message fields carry the corresponding CPace values, base64url-encoded without padding:
+
+| Sendspin field | Carried in | CPace value | Bytes | base64url length |
+|---|---|---|---|---|
+| `pake_msg_1` | [`server/pair-auth`](#server--client-serverpair-auth) | `Ya` (server's public share) | 32 | 43 |
+| `pake_msg_2` | [`client/pair-auth`](#client--server-clientpair-auth) | `Yb` (client's public share) | 32 | 43 |
+| `server_kc` | [`server/pair-confirm`](#server--client-serverpair-confirm) | `Ta` (server's MCF tag, HMAC-SHA-512) | 64 | 86 |
+| `client_kc` | [`client/pair-confirm`](#client--server-clientpair-confirm) | `Tb` (client's MCF tag, HMAC-SHA-512) | 64 | 86 |
+
+### PIN-Pairing Lockout
+
+PIN-pairing brute-force protection is built around a per-method failure counter that transitions to terminal lockout. For `static_pin`, the [pairing window](#pairing-window) additionally gates each attempt on a fresh operator gesture.
+
+The following rules are mandatory for clients implementing `static_pin` or `dynamic_pin`:
+
+- **Per-method failure counter.** The client maintains a failure counter for each PIN-pairing method family (`static_pin` and `dynamic_pin` tracked independently). The counter is persisted across reboots. It is not partitioned by `server_id` or source IP: a single per-method counter for the device.
+- **Increment.** The counter for a method increments on each inner-authentication failure observed in that method's flow.
+- **Reset.** The counter for a method resets to zero when that method's inner authentication succeeds.
+- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from a paired server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
+
+### Client → Server: `client/hello` pair-method descriptor
+
+Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clienthello) is a descriptor object that names the pairing method and, for the PIN methods, advertises the kind of operator interaction the client expects so the server can render appropriate UX.
+
+- `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - the pairing method identifier.
+- `out_channels?`: ('display' | 'speaker' | 'other')[] - informational hint for `dynamic_pin` only, listing the channels through which the per-session PIN is conveyed to the operator.
+- `min_pin_length?`: integer - the shortest PIN length in digits the client will accept for this method. Required on `dynamic_pin` descriptors, absent on others. Range 4–12 (RECOMMENDED initial value at least 6). The server combines it with its own minimum to choose the [PIN length](#dynamic-pin-pairing-flow).
+- `locked_out?`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout), `false` when ready to accept a pairing attempt. Present on PIN-method descriptors only, absent for `pairing_psk`. Lets the server render appropriate UX ("device requires manual unlock") and decide whether to attempt this method at all.
+
+### Messages
+
+The pairing messages below are listed in the order they appear in the dynamic PIN flow (the most complete sequence). Static PIN pairing omits the [`server/pair-init`](#server--client-serverpair-init) message and the `commit_B` / `nonce_B` fields, but still uses [`client/pair-init`](#client--server-clientpair-init) as the pairing-window-opened signal; the Pairing PSK Flow additionally omits all `pair-init`, `pair-auth`, and `pair-confirm` messages.
+
+#### Client → Server: `client/pair-init`
+
+Signals that the client is ready to proceed with the PIN-pairing flow. In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/activate`](#server--client-serveractivate). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
+
+- `commit_B?`: string - `SHA-256(nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
+
+#### Server → Client: `server/pair-init`
+
+Server's nonce contribution in the [Dynamic PIN pairing](#dynamic-pin-pairing-flow) flow. Sent in response to [`client/pair-init`](#client--server-clientpair-init).
+
+- `nonce_A`: string - 32 bytes from a CSPRNG, base64url-encoded (43 chars). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
+- `pin_length`: integer - the [PIN length](#dynamic-pin-pairing-flow) in digits: `max(client_min, server_min)` clamped to 4–12.
+
+Upon receipt, the client validates `pin_length` against its own `min_pin_length` (see [PIN length](#dynamic-pin-pairing-flow)), then derives and emits the PIN; the operator then types it into the server.
+
+#### Server → Client: `server/pair-auth`
+
+Server's CPace public share. Sent once the server has both received [`client/pair-init`](#client--server-clientpair-init) (confirming the pairing window is open) and has the PIN - i.e., once the operator has entered the PIN (static PIN: the PIN is printed and available to the operator from the start; dynamic PIN: the PIN is emitted by the client after [`server/pair-init`](#server--client-serverpair-init)).
+
+- `pake_msg_1`: string - server's CPace public share `Ya` (32 bytes base64url-encoded, 43 chars). See [PAKE](#pake)
+
+#### Client → Server: `client/pair-auth`
+
+Client's CPace public share, sent in response to [`server/pair-auth`](#server--client-serverpair-auth).
+
+- `pake_msg_2`: string - client's CPace public share `Yb` (32 bytes base64url-encoded, 43 chars). See [PAKE](#pake)
+
+#### Server → Client: `server/pair-confirm`
+
+Server's MCF tag, sent after the server has derived its CPace session key from `Yb`.
+
+- `server_kc`: string - server's MCF tag `Ta` (64 bytes base64url-encoded, 86 chars). See [PAKE](#pake)
+
+On receipt, the client verifies `server_kc` before sending [`client/pair-confirm`](#client--server-clientpair-confirm); see [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow) / [Static PIN Pairing Flow](#static-pin-pairing-flow).
+
+#### Client → Server: `client/pair-confirm`
+
+Client's MCF tag, plus (in dynamic PIN pairing) the opening of the earlier commitment. In PIN pairing, the client sends [`client/pair-finalize`](#client--server-clientpair-finalize) immediately after this message without waiting for a server response.
+
+- `client_kc`: string - client's MCF tag `Tb` (64 bytes base64url-encoded, 86 chars). See [PAKE](#pake)
+- `nonce_B?`: string - the 32-byte preimage of `commit_B` sent earlier in [`client/pair-init`](#client--server-clientpair-init), base64url-encoded (43 chars). Present only in dynamic PIN pairing. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
+
+On receipt, the server verifies before processing [`client/pair-finalize`](#client--server-clientpair-finalize); see [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow) / [Static PIN Pairing Flow](#static-pin-pairing-flow).
+
+#### Client → Server: `client/pair-finalize`
+
+Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate).
+
+- `long_term_psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
+
+#### Server → Client: `server/pair-finalize`
+
+Acknowledges that the server has persisted the pairing record. After receiving this message, the client persists its own record.
+
+- payload: `{}`
+
+#### Client ↔ Server: `pair/abort`
+
+Aborts a pairing attempt. The sender closes the connection after sending.
+
+- `reason`: string - one of:
+  - `attempt_timeout` (client) - the pairing attempt did not complete within the attempt timeout after [`client/pair-init`](#client--server-clientpair-init) was sent; see [Pairing window](#pairing-window)
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
+  - `locked_out` (client) - the client is in [terminal lockout](#pin-pairing-lockout) for the selected pairing method
+  - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
+  - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
+  - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the commitment opening or PIN binding check failed
+  - `user_cancelled` (client) - operator aborted the pairing through a local UI
+
+## Management
+
+This section covers the management commands a paired (`user`-trust) server may issue.
+
+Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [Sendspin PSK](#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
+
+All `management/*` requests are answered by a single [`management/result`](#client--server-managementresult) message. At most one management request may be in flight per connection; in-order WebSocket delivery makes the reply unambiguous.
+
+### Records
+
+Read, create, and remove the pairing records stored by the client. Each record holds a [Sendspin PSK](#definitions); every record carries `user` [trust level](#definitions). Records come in two kinds:
+
+- **Stored-pubkey records** bind a per-server PSK to a specific `server_id`.
+- **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
+
+Across all record operations, a record is identified by its `psk_id` (see [Pre-Shared Key](#pre-shared-key) for the derivation).
+
+#### Server → Client: `management/list-records`
+
+No payload fields.
+
+On success, `data: { records: object[] }`. Each entry in `records`:
+
+- `psk_id`: string
+- `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
+- `used`: boolean - `true` once a server has authenticated a session with this record's PSK
+
+Possible outcomes: `ok`, `permission_denied`.
+
+#### Server → Client: `management/add-record`
+
+Add a pairing record directly.
+
+- `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
+- `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
+
+Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
+
+#### Server → Client: `management/remove-record`
+
+Remove a pairing record.
+
+- `psk_id`: string
+
+Removing the requester's own record closes the management session with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'` after the response.
+
+A record that is still referenced by a `record_mode.psk_id` (see [Record mode](#record-mode)) cannot be removed.
+
+Possible outcomes: `ok`, `permission_denied`, `invalid`, `not_found`.
+
+### Pairing Config
+
+Commands for inspecting and modifying the client's pairing configuration.
+
+#### Server → Client: `management/get-pairing-config`
+
+No payload fields.
+
+On success, `data` is shaped as:
+
+- `pairing_psk`: object
+  - `enabled`: boolean
+- `static_pin?`: object
+  - `enabled`: boolean
+  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
+- `dynamic_pin?`: object
+  - `enabled`: boolean
+  - `min_pin_length`: integer - the shortest dynamic PIN length in digits the client will accept (4–12); see [PIN length](#dynamic-pin-pairing-flow)
+  - `locked_out`: boolean - `true` when the method is in [terminal lockout](#pin-pairing-lockout)
+- `record_mode`: object - see [Record mode](#record-mode)
+- `unpaired_access`: object - see [Unpaired Access](#unpaired-access)
+  - `enabled`: boolean
+
+A PIN-method object is absent if the client does not implement that method.
+
+Configured secrets (the Pairing PSK and the static PIN) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
+
+Possible outcomes: `ok`, `permission_denied`.
+
+#### Server → Client: `management/set-pairing-config`
+
+Modify pairing config.
+
+- `pairing_psk?`: object
+  - `enabled?`: boolean
+  - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured Pairing PSK
+- `static_pin?`: object
+  - `enabled?`: boolean
+  - `pin?`: string - 8 decimal digits; replaces the configured static PIN
+  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
+- `dynamic_pin?`: object
+  - `enabled?`: boolean
+  - `min_pin_length?`: integer - the shortest dynamic PIN length in digits the client will accept; must be in 4–12 range. See [PIN length](#dynamic-pin-pairing-flow)
+  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](#pin-pairing-lockout)
+- `record_mode?`: object - see [Record mode](#record-mode)
+- `unpaired_access?`: object - see [Unpaired Access](#unpaired-access)
+  - `enabled?`: boolean
+
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Setting fields on a method the client does not implement returns `invalid`.
+
+Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`,  `storage_exhausted`.
+
+#### Record mode
+
+When a server completes pairing via any method, the resulting record is created according to the client's `record_mode`, a setting configured via [`management/set-pairing-config`](#server--client-managementset-pairing-config).
+
+`record_mode?`: object
+- `psk_id`: string - the shared-PSK record used as the storage-exhaustion fallback.
+
+The client creates a stored-pubkey record bound to the server, holding a freshly generated per-server [Sendspin PSK](#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
+
+`psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
+
+### Client → Server: `management/result`
+
+Response to a `management/*` request. The at-most-one-in-flight rule (see [Management](#management)) lets the server match each reply to its request by ordering alone, so no request-identifier field is carried.
+
+- `result`: string - result code. See each request's outcomes line for the subset that applies.
+  - `ok` - operation completed and any state change has been persisted
+  - `permission_denied` - the request was issued outside a valid management session
+  - `already_exists` - the request conflicts with an existing entry on the client
+  - `invalid` - the request payload is malformed, contains an out-of-range value, omits a field required for the chosen operation, or violates a referential constraint
+  - `not_found` - the request targets an identifier (e.g., `psk_id`) that does not exist on the client
+  - `storage_exhausted` - the client cannot persist the change due to full storage
+- `data?`: object - operation-specific response payload. Present only when the in-flight request defines one and `result` is `ok`; see each request for the shape.
+- `storage?`: object - storage accounting; a client that tracks bounded storage includes it on every result except `permission_denied`. See [Storage accounting](#storage-accounting).
+
+#### Storage accounting
+
+Records (and, on some clients, operator-set pairing secrets) share one storage pool. A client that can bound this pool reports it in the `storage` key, letting a server show remaining capacity and predict which operations will succeed; a client whose storage is effectively unbounded or of unknown size omits the key, and the server relies on `storage_exhausted` alone.
+
+- `free`: integer - currently free space.
+- `capacity`: integer - total pool size.
+- `cost_individual`: integer - what a new stored-pubkey record consumes.
+- `cost_shared`: integer - what a new shared-PSK record consumes.
+
+All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a kind can persist when `free` is at least its cost; `storage_exhausted` however stays authoritative.
+
+A secret set via [`set-pairing-config`](#server--client-managementset-pairing-config) may also draw on the pool but isn't covered by these costs.
+
+The object always carries `free`; `capacity` and the costs appear additionally on [`list-records`](#server--client-managementlist-records) and [`get-pairing-config`](#server--client-managementget-pairing-config) results.
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
@@ -485,12 +1148,14 @@ Informs the server of player-specific state changes. Only for clients with the `
 State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
-  - `volume?`: integer - range 0-100, must be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `muted?`: boolean - mute state, must be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `static_delay_ms`: integer - static delay in milliseconds (0-5000), always required for players
-  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), always required for players. Measured from server transmit time of the start/restart trigger ([`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the timestamp of the first subsequent audio chunk.
-  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. Always required for players.
+  - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `static_delay_ms`: integer - static delay in milliseconds (0-5000), REQUIRED for players
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full.
+  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players.
   - `supported_commands?`: string[] - subset of: 'set_static_delay'
+
+**Delta updates:** The presence requirements above (REQUIRED fields, and fields that MUST be included when a command is supported) describe a player's full state, reported in the initial message. In any later update a player MAY omit fields whose values have not changed, per the delta rules in [`client/state`](#client--server-clientstate).
 
 **Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections. Clients may update `static_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
@@ -559,9 +1224,11 @@ The `controller` object in [`client/command`](#client--server-clientcommand) has
 Control the group that's playing and switch groups. Only valid from clients with the `controller` role.
 
 - `controller`: object
-  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
+  - `command`: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative' - should be one of the values listed in `supported_commands` from the [`server/state`](#server--client-serverstate-controller-object) `controller` object. Commands not in `supported_commands` are ignored by the server
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
+  - `position_ms?`: integer - absolute playback position in milliseconds, range 0 to [`seek_max_ms`](#server--client-serverstate-controller-object), only set if `command` is `seek`
+  - `offset_ms?`: integer - signed offset in milliseconds from the current position (positive forward, negative backward), only set if `command` is `seek_relative`
 
 #### Command behaviour
 
@@ -578,6 +1245,8 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'shuffle' - randomize playback order
 - 'unshuffle' - restore original playback order
 - 'switch' - move this client to the next group in a predefined cycle as described [below](#switch-command-cycle)
+- 'seek' - seek to an absolute position. The client MUST include `position_ms`; the server MUST ignore the command if `position_ms` is outside the range 0 to `seek_max_ms`
+- 'seek_relative' - seek by an offset from the current position. The client MUST include `offset_ms`; the server applies it on a best-effort basis and MUST clamp the result to the seekable range
 
 **Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
 
@@ -613,11 +1282,12 @@ For clients **without** the `player` role, the cycle includes:
 The `controller` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `controller`: object
-  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch'
+  - `supported_commands`: string[] - subset of: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume' | 'mute' | 'repeat_off' | 'repeat_one' | 'repeat_all' | 'shuffle' | 'unshuffle' | 'switch' | 'seek' | 'seek_relative'
   - `volume`: integer - volume of the whole group, range 0-100
   - `muted`: boolean - mute state of the whole group
   - `repeat`: 'off' | 'one' | 'all' - repeat mode: 'off' = no repeat, 'one' = repeat current track, 'all' = repeat all tracks (in the queue, playlist, etc.)
   - `shuffle`: boolean - shuffle mode enabled/disabled
+  - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
 
 **Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
 
