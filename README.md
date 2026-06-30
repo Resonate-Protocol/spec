@@ -289,7 +289,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
-A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback.
+A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `state: 'synchronized'` until its time filter has converged enough to timestamp captured audio.
 
 ## Playback Synchronization
 
@@ -554,7 +554,7 @@ Sent once the client is ready to report its operational `state`, and whenever an
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server.
+  - `'synchronized'` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
@@ -1290,7 +1290,7 @@ The client ends the current input stream. After this message, no more source aud
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`).
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`) or the client is not in the `synchronized` [state](#client--server-clientstate).
 Clients MUST send `client_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
