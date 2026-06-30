@@ -5,8 +5,9 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
+  - **Source** - captures audio from a local input and streams it to the server
   - **Controller** - controls the Sendspin group this client is part of
   - **Metadata** - displays text metadata (title, artist, album, etc.)
   - **Artwork** - displays artwork images. Has preferred format for images
@@ -24,7 +25,7 @@ Sendspin is a multi-room music experience protocol. The goal of the protocol is 
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](#player-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](#player-messages), [`source`](#source-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -239,7 +240,7 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
 - `000001xx` (4-7): Player role
 - `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Reserved for a future role
+- `000011xx` (12-15): Source role
 - `00010xxx` (16-23): Visualizer role
 - Roles 6-47 (IDs 24-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
@@ -288,7 +289,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
-A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback.
+A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `state: 'synchronized'` until its time filter has converged enough to timestamp captured audio.
 
 ## Playback Synchronization
 
@@ -475,12 +476,14 @@ Players that can output audio should have the role `player`.
 - `trust_level`: 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which operations the server may issue. `'user'` reflects a pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
+  - `source@v1` - captures audio from a local input and streams it to the server
   - `controller@v1` - controls the current Sendspin group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
+- `source@v1_support?`: object - only if `source@v1` is listed ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor).
@@ -551,9 +554,10 @@ Sent once the client is ready to report its operational `state`, and whenever an
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
 - `state`: 'synchronized' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and ready to participate in playback; for a player this means its clock is synchronized with the server.
+  - `'synchronized'` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
   - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
+- `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -597,6 +601,7 @@ Only include fields that have changed. The client will merge these updates into 
 Server sends commands to the client. Contains role-specific command objects.
 
 - `player?`: object - only sent to clients with `player` role ([see player command object details](#server--client-servercommand-player-object))
+- `source?`: object - only sent to clients with `source` role ([see source command object details](#server--client-servercommand-source-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -1213,6 +1218,90 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 - Rest of bytes: encoded audio frame
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`static_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays, amplifier delays) by accounting for these delays when submitting audio to the hardware.
+
+## Source messages
+This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
+
+A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin).
+
+**Note:** The `source` role (capturing input *into* Sendspin) is distinct from the client-level [`state: 'external_source'`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
+
+A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. Binary source audio messages are timestamped in the server time domain by converting the local capture time with the offset the time filter tracks.
+
+**Pairing required:** A source streams captured audio (potentially from a microphone or line-in) to the server, so it MUST only run on a paired connection ([trust level](#definitions) `user`). Servers MUST NOT activate `source@v1` over [unpaired access](#unpaired-access), and a source client MUST refuse to stream when the connection's trust level is `none`.
+
+### Client → Server: `client/hello` source@v1 support object
+
+The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `source@v1_support`: object
+  - `supported_formats`: object[] - list of supported capture/encode formats in priority order (first is preferred)
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
+    - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
+    - `bit_depth`: integer - bit depth (e.g., 16, 24)
+  - `features?`: object - optional feature hints
+    - `line_sense?`: boolean - true if source reports `signal`
+
+**Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+### Client → Server: `client/state` source object
+
+The `source` object in [`client/state`](#client--server-clientstate) has this structure:
+
+- `source`: object
+  - `signal?`: 'present' | 'absent' - optional line sensing/signal presence, only if 'line_sense' is supported
+
+### Server → Client: `server/command` source object
+
+The `source` object in [`server/command`](#server--client-servercommand) has this structure:
+
+- `source`: object
+  - `command`: 'start' | 'stop'
+
+#### Source command semantics
+
+- `command` controls whether this source streams to the server:
+  - `start`: server requests the source to begin streaming. The client SHOULD send `client_stream/start` and then send source audio chunks.
+  - `stop`: server requests the source to stop streaming. The client SHOULD send `client_stream/end` and stop sending source audio chunks.
+
+#### Default streaming behavior
+
+The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming.
+
+A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
+
+When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `client_stream/end` and stops sending chunks.
+
+### Client → Server: `client_stream/start`
+
+The `client_stream/start` message announces the active input stream format and provides any required codec header data.
+
+- `source`: object
+  - `codec`: 'opus' | 'flac' | 'pcm'
+  - `channels`: integer
+  - `sample_rate`: integer
+  - `bit_depth`: integer
+  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+
+### Client → Server: `client_stream/end`
+
+The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `client_stream/start`.
+
+### Client → Server: Source Audio Chunks (Binary)
+
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`) or the client is not in the `synchronized` [state](#client--server-clientstate).
+Clients MUST send `client_stream/start` before the first audio chunk.
+
+- Byte 0: message type `12` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
+- Rest of bytes: encoded audio frame
+
+The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
+
+A device that implements both `source` and `player` MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
+
+**Note:** Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
