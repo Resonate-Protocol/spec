@@ -1212,8 +1212,8 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to begin streaming. The client SHOULD send `input_stream/start` and then send source audio chunks.
-  - `stop`: server requests the source to stop streaming. The client SHOULD send `input_stream/end` and stop sending source audio chunks.
+  - `start`: server requests the source to begin streaming. The client SHOULD send `client_stream/start` and then send source audio chunks.
+  - `stop`: server requests the source to stop streaming. The client SHOULD send `client_stream/end` and stop sending source audio chunks.
 
 #### Default streaming behavior
 
@@ -1221,11 +1221,11 @@ The default after the handshake is `stop`: a source MUST NOT stream until the se
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
-When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `input_stream/end` and stops sending chunks.
+When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `client_stream/end` and stops sending chunks.
 
-### Client → Server: `input_stream/start`
+### Client → Server: `client_stream/start`
 
-The `input_stream/start` message announces the active input stream format and provides any required codec header data.
+The `client_stream/start` message announces the active input stream format and provides any required codec header data.
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
@@ -1234,14 +1234,14 @@ The `input_stream/start` message announces the active input stream format and pr
   - `bit_depth`: integer
   - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
 
-### Client → Server: `input_stream/end`
+### Client → Server: `client_stream/end`
 
-The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `input_stream/start`.
+The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `client_stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before an `input_stream/start` or after an `input_stream/end`).
-Clients MUST send `input_stream/start` before the first audio chunk.
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`).
+Clients MUST send `client_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
