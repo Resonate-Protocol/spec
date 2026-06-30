@@ -286,6 +286,8 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
+A player MUST send a `client/state` message with `state: 'synchronized'` once its time filter has converged enough to begin scheduling playback.
+
 ## Playback Synchronization
 
 This section defines rules that require all implementations to provide a good experience, keeping playback seamlessly synchronized between speakers. While implementations can choose their own strategy, this section describes the minimal requirements that must be met by players. For a recommended strategy that is compliant, see the [Suggested correction strategy](#suggested-correction-strategy) subsection below.
