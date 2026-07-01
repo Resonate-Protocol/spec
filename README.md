@@ -43,7 +43,7 @@ Servers should track when clients request roles or role versions they don't impl
 
 ### Application-Specific Roles
 
-Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`.
+Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`. To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
 
 ## Establishing a Connection
 
@@ -56,7 +56,7 @@ Sendspin Servers must support both methods described below.
 Clients announce their presence via mDNS using:
 - Service type: `_sendspin._tcp.local.`
 - Port: The port the Sendspin client is listening on (recommended: `8928`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
+- TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the player (optional)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
@@ -89,7 +89,7 @@ A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye
 If clients prefer to initiate the connection instead of waiting for the server to connect, the server must be discoverable via mDNS using:
 - Service type: `_sendspin-server._tcp.local.`
 - Port: The port the Sendspin server is listening on (recommended: `8927`)
-- TXT record: `path` key specifying the WebSocket endpoint (recommended: `/sendspin`)
+- TXT record: `path` key specifying the WebSocket endpoint, REQUIRED (recommended value: `/sendspin`)
 - TXT record: `name` key specifying the friendly name of the server (optional)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
@@ -565,6 +565,8 @@ The initial message MUST include all state fields. In subsequent messages, the c
 
 When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and is not currently participating in Sendspin playback with this server.
 
+A client SHOULD report `external_source` only while it will not yield its output to Sendspin. If the current external activity can be interrupted by Sendspin playback, the client SHOULD stay `synchronized` (letting the server take over at any time) rather than reporting `external_source`, and SHOULD return to `synchronized` as soon as it is again willing to be taken over.
+
 #### Server behavior when `state` changes to `'external_source'`:
 
 If the client is in a multi-client group:
@@ -615,6 +617,8 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
+The server MUST NOT send `stream/start` to a client that is not in the [`synchronized`](#client--server-clientstate) state (e.g. a client in [`external_source`](#external-source-handling)).
 
 ### Server → Client: `stream/clear`
 
@@ -683,7 +687,7 @@ Sent by the client before gracefully closing the connection. This allows the cli
 Upon receiving this message, the server should initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
-  - `another_server` - client is switching to a different Sendspin server. Server should not auto-reconnect but should show the client as available for future playback
+  - `another_server` - client is switching to a different Sendspin server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server should not auto-reconnect but should show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
@@ -691,6 +695,8 @@ Upon receiving this message, the server should initiate the disconnect.
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
+
+**Note:** When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send `shutdown`.
 
 **Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
 
@@ -713,6 +719,8 @@ This specification defines three pairing methods. Servers must implement all thr
 Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers)); the operator must stop playback before initiating pairing.
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
+
+The initial static PIN MUST be device-specific (e.g., randomly generated and printed on the device, or otherwise factory-provisioned) and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device.
 
 ### Entering and leaving pairing
 
@@ -1166,6 +1174,8 @@ State updates must be sent whenever any state changes, including when the volume
 
 **Static delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `static_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers). Negative values are not supported and should never be required for any compliant implementation. Clients must persist `static_delay_ms` locally across reboots and server reconnections. Clients may update `static_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
+**Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
+
 **Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
 
 ### Client → Server: `stream/request-format` player object
@@ -1203,7 +1213,7 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `sample_rate`: integer - sample rate to be used
   - `channels`: integer - channels to be used
   - `bit_depth`: integer - bit depth to be used
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+  - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
 ### Server → Client: `stream/clear` player
 
@@ -1235,13 +1245,10 @@ A source client uses the same [clock synchronization](#clock-synchronization) me
 The `source@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `source@v1_support`: object
-  - `supported_formats`: object[] - list of supported capture/encode formats in priority order (first is preferred)
-    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
-    - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
-    - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
-    - `bit_depth`: integer - bit depth (e.g., 16, 24)
   - `features?`: object - optional feature hints
     - `line_sense?`: boolean - true if source reports `signal`
+
+A source declares its capture format per stream in `client_stream/start`; the server accepts whatever the source produces, so no format is advertised here.
 
 **Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
@@ -1282,7 +1289,7 @@ The `client_stream/start` message announces the active input stream format and p
   - `channels`: integer
   - `sample_rate`: integer
   - `bit_depth`: integer
-  - `codec_header?`: string - Base64 encoded codec header (if necessary; e.g., FLAC)
+  - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
 ### Client → Server: `client_stream/end`
 
