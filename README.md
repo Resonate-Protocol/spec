@@ -1260,8 +1260,6 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
   - `features?`: object - optional feature hints
     - `line_sense?`: boolean - true if source reports `signal`
 
-A source declares its capture format per stream in `client_stream/start`; the server accepts whatever the source produces, so no format is advertised here.
-
 **Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
 ### Client → Server: `client/state` source object
