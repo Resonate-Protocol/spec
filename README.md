@@ -563,9 +563,19 @@ The initial message MUST include all state fields. In subsequent messages, the c
 
 ### External Source Handling
 
-When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and is not currently participating in Sendspin playback with this server.
+A client's output can be taken over by a non-Sendspin activity (playing other media, another protocol, an HDMI input, and so on). How it reports this depends on whether it will still yield its output back to Sendspin on request.
 
-A client SHOULD report `external_source` only while it will not yield its output to Sendspin. If the current external activity can be interrupted by Sendspin playback, the client SHOULD stay `synchronized` (letting the server take over at any time) rather than reporting `external_source`, and SHOULD return to `synchronized` as soon as it is again willing to be taken over.
+#### Interruptible activity (client stays available)
+
+If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `synchronized` so the server can take it over.
+
+To stop rendering its group's audio while it does its own thing, a client MAY leave its current group by sending a `client/state` with `state: 'external_source'` immediately followed by a `client/state` with `state: 'synchronized'` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
+
+#### Non-interruptible activity (client becomes unavailable)
+
+When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and will not participate in Sendspin playback with this server until it returns to `synchronized`.
+
+A client SHOULD report `external_source` only while it will not yield its output to Sendspin, and SHOULD return to `synchronized` as soon as it is again willing to be taken over.
 
 #### Server behavior when `state` changes to `'external_source'`:
 
@@ -577,6 +587,8 @@ If the client is in a multi-client group:
 
 If the client is already in a solo group:
 - Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
+
+When a client returns to `synchronized`, the server MUST NOT auto-rejoin it to its previous group or restart playback; the client remains in the solo group and rejoins only via an explicit [`switch`](#switch-command-cycle).
 
 ### Client → Server: `client/command`
 
