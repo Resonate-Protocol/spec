@@ -1200,6 +1200,8 @@ The `player` object in [`stream/request-format`](#client--server-streamrequest-f
   - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
   - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
 
+The requested format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
+
 Response when a `player` stream is active: [`stream/start`](#server--client-streamstart) with the new format.
 
 **Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
