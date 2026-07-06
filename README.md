@@ -699,7 +699,7 @@ Sent by the client before gracefully closing the connection. This allows the cli
 Upon receiving this message, the server should initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
-  - `another_server` - client is switching to a different Sendspin server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server should not auto-reconnect but should show the client as available for future playback
+  - `another_server` - client is switching to a different Sendspin server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
   - `shutdown` - client is shutting down. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
