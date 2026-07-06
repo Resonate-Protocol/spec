@@ -569,7 +569,7 @@ A client's output can be taken over by a non-Sendspin activity (playing other me
 
 If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `synchronized` so the server can take it over.
 
-To stop rendering its group's audio while it does its own thing, a client MAY leave its current group by sending a `client/state` with `state: 'external_source'` immediately followed by a `client/state` with `state: 'synchronized'` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
+To stop rendering its group's audio while performing non-Sendspin activity, a client MAY leave its current group by sending a `client/state` with `state: 'external_source'` immediately followed by a `client/state` with `state: 'synchronized'` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
 
 #### Non-interruptible activity (client becomes unavailable)
 
