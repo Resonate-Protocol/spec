@@ -740,7 +740,7 @@ Pairing and playback are mutually exclusive on a connection. When a server moves
 
 The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
 
-The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received `long_term_psk`. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
+The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received PSK. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
 
 ### Unpaired Access
 
@@ -793,9 +793,9 @@ sequenceDiagram
     Server->>Client: server/pair-confirm (server_kc)
     Note over Client: Verify server_kc
     Client->>Server: client/pair-confirm (client_kc, nonce_B)
-    Note over Server: Verify client_kc, commit opening, and PIN binding
+    Note over Server: Verify commit opening, client_kc, and PIN binding
     Note over Client: Sent back-to-back, no server response awaited
-    Client->>Server: client/pair-finalize (long_term_psk)
+    Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
     Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
 ```
@@ -822,11 +822,11 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pin-derive-v1"
 
 **Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies, in this order:
 
-1. CPace MCF tag `client_kc`
-2. `SHA-256(nonce_B) == commit_B`
+1. `SHA-256(nonce_B) == commit_B`
+2. CPace MCF tag `client_kc`
 3. `derived_PIN(h, nonce_B, nonce_A) == PIN_typed`
 
-All three checks must pass before the server processes [`client/pair-finalize`](#client--server-clientpair-finalize) and persists the pairing record. Any failure results in [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discard of the received `long_term_psk`.
+A revealed `nonce_B` that does not match `commit_B` is a [protocol error](#protocol-errors). A failed key confirmation or PIN binding check results in [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`. Any failure discards the received `wrapped_psk`; only when all three checks pass does the server process [`client/pair-finalize`](#client--server-clientpair-finalize), [unwrapping](#psk-wrapping) the PSK.
 
 **Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
 
@@ -857,14 +857,14 @@ sequenceDiagram
     Client->>Server: client/pair-confirm (client_kc)
     Note over Server: Verify client_kc
     Note over Client: Sent back-to-back, no server response awaited
-    Client->>Server: client/pair-finalize (long_term_psk)
+    Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
     Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
 
-**Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies the CPace MCF tag `client_kc` before processing [`client/pair-finalize`](#client--server-clientpair-finalize). On failure the server sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discards the received `long_term_psk`.
+**Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies the CPace MCF tag `client_kc` before processing [`client/pair-finalize`](#client--server-clientpair-finalize). On failure the server sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discards the received `wrapped_psk`; on success it processes `client/pair-finalize`, [unwrapping](#psk-wrapping) the PSK.
 
 **Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
 
@@ -885,7 +885,8 @@ Sendspin instantiates CPace's inputs as follows:
 - `PRS` - the PIN as a UTF-8 byte string (the literal decimal digits - e.g., `0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38` for the PIN `"12345678"`).
 - `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` concatenated with the Noise handshake hash `h` available immediately after Noise transport mode begins.
 - `CI` - empty.
-- `ADa`, `ADb` - empty.
+- `ADa` - the UTF-8 bytes `"server"`.
+- `ADb` - the UTF-8 bytes `"client"`.
 
 The four pairing message fields carry the corresponding CPace values, base64url-encoded without padding:
 
@@ -895,6 +896,22 @@ The four pairing message fields carry the corresponding CPace values, base64url-
 | `pake_msg_2` | [`client/pair-auth`](#client--server-clientpair-auth) | `Yb` (client's public share) | 32 | 43 |
 | `server_kc` | [`server/pair-confirm`](#server--client-serverpair-confirm) | `Ta` (server's MCF tag, HMAC-SHA-512) | 64 | 86 |
 | `client_kc` | [`client/pair-confirm`](#client--server-clientpair-confirm) | `Tb` (client's MCF tag, HMAC-SHA-512) | 64 | 86 |
+
+### PSK Wrapping
+
+In the PIN flows, [`client/pair-finalize`](#client--server-clientpair-finalize) does not carry the new PSK directly: the client seals it under a key derived from the CPace output, and sends the result as `wrapped_psk`. Both sides derive:
+
+```
+K_wrap = SHA-256("sendspin-pair-psk-wrap-v1" || sid || ISK)
+```
+
+The hash input is the UTF-8 bytes of the literal label (no separator, no NUL terminator) followed by `sid` (the CPace session id defined in [PAKE](#pake), raw) and `ISK` (the 64-byte CPace intermediate session key, raw). The client encrypts the 32-byte PSK with the AEAD of the connection's negotiated [cipher suite](#cipher-suites), key `K_wrap`, a 12-byte all-zero nonce, and empty associated data. `wrapped_psk` carries the 48-byte ciphertext-plus-tag, base64url-encoded without padding (64 chars).
+
+To unwrap, the server decrypts `wrapped_psk` with the same AEAD, key `K_wrap`, and nonce, recovering the 32-byte PSK.
+
+### Protocol Errors
+
+A condition no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, a `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
 
 ### PIN-Pairing Lockout
 
@@ -966,9 +983,10 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate).
+Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#psk-wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate) and carries the PSK directly. Exactly one of the two fields is present.
 
-- `long_term_psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
+- `long_term_psk?`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding). [Pairing PSK Flow](#pairing-psk-flow) only
+- `wrapped_psk?`: string - 64-character base64url-encoded 48-byte [PSK Wrapping](#psk-wrapping) of the new [Sendspin PSK](#definitions) (no padding). PIN flows only
 
 #### Server → Client: `server/pair-finalize`
 
@@ -986,7 +1004,7 @@ Aborts a pairing attempt. The sender closes the connection after sending.
   - `locked_out` (client) - the client is in [terminal lockout](#pin-pairing-lockout) for the selected pairing method
   - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
   - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
-  - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the commitment opening or PIN binding check failed
+  - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the PIN binding check failed
   - `user_cancelled` (client) - operator aborted the pairing through a local UI
 
 ## Management
