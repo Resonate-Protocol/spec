@@ -77,7 +77,7 @@ Clients must persistently store the `server_id` of the server that most recently
 
 When a new server connects, the client lets the handshake complete before applying admission; the new connection is provisional until its first [`server/activate`](#server--client-serveractivate) declares its priority. The incoming connection's priority is compared to the current connection's: higher or equal is accepted, lower is rejected. Two exceptions:
 
-- An in-flight pairing is not displaced by an incoming `'playback'` or `'pairing'` connection.
+- A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
 - When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
 
 Subsequent `server/activate` updates do not trigger arbitration. A provisional connection that has not sent `server/activate` within 30 seconds is dropped.
@@ -690,7 +690,7 @@ Client behavior:
 
 - Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
 - If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](#server--client-managementremove-record).
-- If the connection's `trust_level` is `'none'` (e.g., an in-flight pairing handshake), ignore the message and continue unchanged.
+- If the connection's `trust_level` is `'none'` (e.g., a pairing handshake), ignore the message and continue unchanged.
 
 ### Client → Server: `client/goodbye`
 
@@ -738,9 +738,13 @@ The initial static PIN MUST be device-specific (e.g., randomly generated and pri
 
 Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces it exactly as a transition to [`available: false`](#external-source-handling) does, and sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`.
 
+Each pairing `server/activate` admits one **pairing attempt**, in progress from its first pairing message - [`client/pair-init`](#client--server-clientpair-init) (PIN methods) or [`client/pair-finalize`](#client--server-clientpair-finalize) (Pairing PSK) - until success or [`pair/abort`](#client--server-pairabort). The client bounds each attempt with an **attempt timeout** measured from its first message (recommended 2 minutes); on expiry it sends `pair/abort` with reason `attempt_timeout`.
+
 The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
 
 The same `server/activate` can also end a pairing attempt without finalizing: sent in place of [`server/pair-finalize`](#server--client-serverpair-finalize), it persists nothing and discards any received PSK. A client that, after sending [`client/pair-finalize`](#client--server-clientpair-finalize), receives `server/activate` likewise persists nothing.
+
+After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
 ### Unpaired Access
 
@@ -828,8 +832,6 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pin-derive-v1"
 
 A revealed `nonce_B` that does not match `commit_B` is a [protocol error](#protocol-errors). A failed key confirmation or PIN binding check results in [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`. Any failure discards the received `wrapped_psk`; only when all three checks pass does the server process [`client/pair-finalize`](#client--server-clientpair-finalize), [unwrapping](#psk-wrapping) the PSK.
 
-**Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
-
 **Device-presence verification.** When the server [leaves pairing](#entering-and-leaving-pairing) instead of finalizing, this flow doubles as a device-presence verification: the PIN is emitted through the device's own out-channel, so a successful round confirms the device on the connection is the one the operator is observing - useful on top of static pairing methods, which establish cryptographic identity but do not bind it to a specific physical device.
 
 ### Static PIN Pairing Flow
@@ -866,8 +868,6 @@ sequenceDiagram
 
 **Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies the CPace MCF tag `client_kc` before processing [`client/pair-finalize`](#client--server-clientpair-finalize). On failure the server sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch` and discards the received `wrapped_psk`; on success it processes `client/pair-finalize`, [unwrapping](#psk-wrapping) the PSK.
 
-**Attempt timeout.** Each attempt is bounded by an attempt timeout measured from [`client/pair-init`](#client--server-clientpair-init) until the attempt completes (success, failure, or abort). Recommended 2 minutes. On expiry, the client sends [`pair/abort`](#client--server-pairabort) with reason `attempt_timeout` and closes the connection.
-
 #### Pairing window
 
 Static PIN pairing gates each attempt on a **pairing window**: a state in which the client has decided to accept one pairing attempt. The window admits exactly one attempt and closes on completion, inner-authentication failure, [`pair/abort`](#client--server-pairabort), connection drop, operator cancellation, window-lifetime expiry, or attempt-timeout expiry.
@@ -883,7 +883,7 @@ The PIN pairing flows use **CPACE-X25519-SHA512** as the PAKE construction, defi
 Sendspin instantiates CPace's inputs as follows:
 
 - `PRS` - the PIN as a UTF-8 byte string (the literal decimal digits - e.g., `0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38` for the PIN `"12345678"`).
-- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` concatenated with the Noise handshake hash `h` available immediately after Noise transport mode begins.
+- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` || `h` || `counter`. `h` is the Noise handshake hash (32 bytes, raw) available immediately after Noise transport mode begins; `counter` is the number of pairing [`server/activate`](#server--client-serveractivate) messages sent since the last Noise handshake (`0` for the first attempt), encoded as a big-endian uint32 (4 bytes).
 - `CI` - empty.
 - `ADa` - the UTF-8 bytes `"server"`.
 - `ADb` - the UTF-8 bytes `"client"`.
@@ -922,7 +922,7 @@ The following rules are mandatory for clients implementing `static_pin` or `dyna
 - **Per-method failure counter.** The client maintains a failure counter for each PIN-pairing method family (`static_pin` and `dynamic_pin` tracked independently). The counter is persisted across reboots. It is not partitioned by `server_id` or source IP: a single per-method counter for the device.
 - **Increment.** The counter for a method increments on each inner-authentication failure observed in that method's flow.
 - **Reset.** The counter for a method resets to zero when that method's inner authentication succeeds.
-- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from a paired server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out` and closes.
+- **Terminal lockout.** When a method's counter reaches **10**, the method enters a **terminal lockout** state: the client refuses all pairing attempts for that method indefinitely. Exit requires a deliberate, local operator action (manufacturer-defined), or writing `locked_out: false` for the method via [`management/set-pairing-config`](#server--client-managementset-pairing-config) from a paired server; on successful exit the counter resets to zero. A client MAY surface the lockout to the operator through a device-local mechanism (LED, on-screen indicator, audible cue), but SHOULD NOT use a persistent indicator for it, a transient cue suffices. If a server initiates a pairing-mode connection during terminal lockout, the client sends [`pair/abort`](#client--server-pairabort) with reason `locked_out`.
 
 ### Client → Server: `client/hello` pair-method descriptor
 
@@ -939,8 +939,11 @@ The pairing messages below are listed in the order they appear in the dynamic PI
 
 #### Client → Server: `client/pair-init`
 
-Signals that the client is ready to proceed with the PIN-pairing flow. In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/activate`](#server--client-serveractivate). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
+Starts the PIN-pairing [attempt](#entering-and-leaving-pairing). In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/activate`](#server--client-serveractivate). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
 
+A `pairing_index` lower than the server's own count is a leftover from a superseded pairing and is discarded silently; a higher value is a [protocol error](#protocol-errors). Only a match starts the attempt.
+
+- `pairing_index`: integer - the number of pairing [`server/activate`](#server--client-serveractivate) messages received since the last Noise handshake (`0` for the first attempt).
 - `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
 
 #### Server → Client: `server/pair-init`
@@ -983,7 +986,7 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#psk-wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it is sent immediately after the [`server/activate`](#server--client-serveractivate) and carries the PSK directly. Exactly one of the two fields is present.
+Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#psk-wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it starts the pairing [attempt](#entering-and-leaving-pairing) and is sent immediately after the [`server/activate`](#server--client-serveractivate), carrying the PSK directly. Exactly one of the two fields is present.
 
 - `long_term_psk?`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding). [Pairing PSK Flow](#pairing-psk-flow) only
 - `wrapped_psk?`: string - 64-character base64url-encoded 48-byte [PSK Wrapping](#psk-wrapping) of the new [Sendspin PSK](#definitions) (no padding). PIN flows only
@@ -996,16 +999,16 @@ Acknowledges that the server has persisted the pairing record. After receiving t
 
 #### Client ↔ Server: `pair/abort`
 
-Aborts a pairing attempt. The sender closes the connection after sending.
+Aborts a pairing attempt, started or not. With reason `concurrent_attempt` or `method_not_supported` the sender closes the connection after sending, otherwise the connection stays open. A `pair/abort` received after the receiver has itself ended the attempt has no effect.
 
 - `reason`: string - one of:
-  - `attempt_timeout` (client) - the pairing attempt did not complete within the attempt timeout after [`client/pair-init`](#client--server-clientpair-init) was sent; see [Pairing window](#pairing-window)
+  - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
   - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
   - `locked_out` (client) - the client is in [terminal lockout](#pin-pairing-lockout) for the selected pairing method
   - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client did not list in [`supported_pair_methods`](#client--server-clienthello)
   - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
   - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the PIN binding check failed
-  - `user_cancelled` (client) - operator aborted the pairing through a local UI
+  - `user_cancelled` (client or server) - operator aborted the pairing
 
 ## Management
 
