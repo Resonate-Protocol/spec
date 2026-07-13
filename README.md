@@ -289,7 +289,7 @@ Binary audio messages contain timestamps in the server's time domain indicating 
 
 Each [`server/time`](#server--client-servertime) response provides the four timestamps needed by the filter: the client's transmitted timestamp, the server's received timestamp, the server's transmitted timestamp, and the client's receive time (captured locally when the response arrives). Clients feed these into the time filter via its `update` method and use its `compute_client_time` method to convert server timestamps to local clock values for playback scheduling.
 
-A player MUST NOT report `state: 'synchronized'` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `state: 'synchronized'` until its time filter has converged enough to timestamp captured audio.
+A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
 
 ## Playback Synchronization
 
@@ -361,7 +361,7 @@ sequenceDiagram
     end
 
     Note over Client,Server: Clock synchronization established
-    Client->>Server: client/state (state: synchronized, player: volume, muted)
+    Client->>Server: client/state (available: true, player: volume, muted)
 
     alt Stream starts
         Server->>Client: stream/start (codec, format details)
@@ -549,13 +549,13 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational `state`, and whenever any state changes thereafter. A player reports `state: 'synchronized'` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send its full state.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send its full state.
 
 The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
 
-- `state`: 'synchronized' | 'external_source' - operational state of the client
-  - `'synchronized'` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
-  - `'external_source'` - client is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
+- `available`: boolean - whether the client is available to participate in Sendspin playback
+  - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
+  - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
 
@@ -567,17 +567,17 @@ A client's output can be taken over by a non-Sendspin activity (playing other me
 
 #### Interruptible activity (client stays available)
 
-If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `synchronized` so the server can take it over.
+If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `available: true` so the server can take it over.
 
-To stop rendering its group's audio while performing non-Sendspin activity, a client MAY leave its current group by sending a `client/state` with `state: 'external_source'` immediately followed by a `client/state` with `state: 'synchronized'` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
+To stop rendering its group's audio while performing non-Sendspin activity, a client MAY leave its current group by sending a `client/state` with `available: false` immediately followed by a `client/state` with `available: true` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
 
 #### Non-interruptible activity (client becomes unavailable)
 
-When a client sets `state: 'external_source'`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and will not participate in Sendspin playback with this server until it returns to `synchronized`.
+When a client reports `available: false`, it indicates the client's output is in use by an external system (e.g., a different audio source, HDMI input, or local media playback) and will not participate in Sendspin playback with this server until it returns to `available: true`.
 
-A client SHOULD report `external_source` only while it will not yield its output to Sendspin, and SHOULD return to `synchronized` as soon as it is again willing to be taken over.
+A client SHOULD report `available: false` only while it will not yield its output to Sendspin, and SHOULD return to `available: true` as soon as it is again willing to be taken over.
 
-#### Server behavior when `state` changes to `'external_source'`:
+#### Server behavior when a client becomes unavailable (`available: false`):
 
 If the client is in a multi-client group:
 1. Remember the client's current group as its "previous group" (see [switch command cycle](#switch-command-cycle))
@@ -588,7 +588,7 @@ If the client is in a multi-client group:
 If the client is already in a solo group:
 - Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
 
-When a client returns to `synchronized`, the server MUST NOT auto-rejoin it to its previous group or restart playback; the client remains in the solo group and rejoins only via an explicit [`switch`](#switch-command-cycle).
+When a client returns to `available: true`, the server MUST NOT auto-rejoin it to its previous group or restart playback; the client remains in the solo group and rejoins only via an explicit [`switch`](#switch-command-cycle).
 
 ### Client → Server: `client/command`
 
@@ -630,7 +630,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-The server MUST NOT send `stream/start` to a client that is not in the [`synchronized`](#client--server-clientstate) state (e.g. a client in [`external_source`](#external-source-handling)).
+The server MUST NOT send `stream/start` to a client that is not [`available`](#client--server-clientstate) (e.g. a client whose output is taken by an [external source](#external-source-handling)).
 
 ### Server → Client: `stream/clear`
 
@@ -736,7 +736,7 @@ The initial static PIN MUST be device-specific (e.g., randomly generated and pri
 
 ### Entering and leaving pairing
 
-Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces it exactly as an [`external_source`](#external-source-handling) transition does, and sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`.
+Pairing and playback are mutually exclusive on a connection. When a server moves an established connection into pairing it first quiesces it exactly as a transition to [`available: false`](#external-source-handling) does, and sends the pairing [`server/activate`](#server--client-serveractivate) with empty `active_roles`.
 
 The `server/activate` that ends the pairing transition declares the connection's resulting `activities` and reactivates roles via `active_roles`.
 
@@ -804,7 +804,7 @@ sequenceDiagram
 
 - `nonce_A` - 32 bytes drawn from a CSPRNG by the server, sent in [`server/pair-init`](#server--client-serverpair-init), base64url-encoded (43 chars).
 - `nonce_B` - 32 bytes drawn from a CSPRNG by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it (base64url-encoded, 43 chars).
-- `commit_B` - `SHA-256(nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the PIN derivation.
+- `commit_B` - `SHA-256("sendspin-pair-commit-v1" || nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the PIN derivation.
 
 **PIN length.** The digit count `L` is determined per pairing session as the larger of the two sides' minimums: `L = max(client_min, server_min)`, clamped to 4–12, where `client_min` is `min_pin_length` from the client's [`dynamic_pin` descriptor](#client--server-clienthello-pair-method-descriptor) and `server_min` is the server's operator-configured minimum. The server computes it and sends it as `pin_length` in [`server/pair-init`](#server--client-serverpair-init). The client rejects a `pin_length` outside `[min_pin_length, 12]` with [`pair/abort`](#client--server-pairabort) reason `pin_length_unacceptable`.
 
@@ -822,7 +822,7 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pin-derive-v1"
 
 **Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies, in this order:
 
-1. `SHA-256(nonce_B) == commit_B`
+1. `SHA-256("sendspin-pair-commit-v1" || nonce_B) == commit_B`
 2. CPace MCF tag `client_kc`
 3. `derived_PIN(h, nonce_B, nonce_A) == PIN_typed`
 
@@ -941,7 +941,7 @@ The pairing messages below are listed in the order they appear in the dynamic PI
 
 Signals that the client is ready to proceed with the PIN-pairing flow. In static PIN, sent after the operator gesture opens the [pairing window](#pairing-window). In dynamic PIN, sent immediately after [`server/activate`](#server--client-serveractivate). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static PIN) or [`server/pair-init`](#server--client-serverpair-init) (dynamic PIN) before receiving this message.
 
-- `commit_B?`: string - `SHA-256(nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
+- `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
 
 #### Server → Client: `server/pair-init`
 
@@ -1253,7 +1253,7 @@ When [`stream/clear`](#server--client-streamclear) includes the player role, cli
 
 ### Server → Client: Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
+Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate).
 
 - Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
@@ -1266,7 +1266,7 @@ This section describes messages specific to clients with the `source` role, whic
 
 A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin).
 
-**Note:** The `source` role (capturing input *into* Sendspin) is distinct from the client-level [`state: 'external_source'`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
+**Note:** The `source` role (capturing input *into* Sendspin) is distinct from a client reporting [`available: false`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
 
 A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. Binary source audio messages are timestamped in the server time domain by converting the local capture time with the offset the time filter tracks.
 
@@ -1327,7 +1327,7 @@ The client ends the current input stream. After this message, no more source aud
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`) or the client is not in the `synchronized` [state](#client--server-clientstate).
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`) or the client is not [`available`](#client--server-clientstate).
 Clients MUST send `client_stream/start` before the first audio chunk.
 
 - Byte 0: message type `12` (uint8)
@@ -1394,7 +1394,7 @@ This ensures that when setting group volume to 100%, all players will reach 100%
 
 #### Switch command cycle
 
-**Previous group priority:** If the client is still in the solo group from its `'external_source'` transition, the `switch` command prioritizes rejoining the previous group.
+**Previous group priority:** If the client is still in the solo group from becoming unavailable (`available: false`), the `switch` command prioritizes rejoining the previous group.
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
@@ -1505,7 +1505,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 ### Server → Client: Artwork (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate).
+Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate).
 
 - Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
@@ -1575,7 +1575,7 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 
 ### Server → Client: Visualization Data (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not in the `synchronized` [state](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
+Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
