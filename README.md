@@ -718,7 +718,7 @@ Upon receiving this message, the server should initiate the disconnect.
 
 ## Pairing
 
-Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered `long_term_psk`, bringing the channel under the new trust ceiling without closing the WebSocket.
+Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered PSK, bringing the channel under the new trust ceiling without closing the WebSocket.
 
 This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement either or both PIN methods.
 
@@ -764,7 +764,7 @@ sequenceDiagram
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], selected_pair_method=pairing_psk)
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
 ```
 
 If a Sentinel-keyed connection is already open when the operator picks `pairing_psk`, the server first [re-handshakes](#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
@@ -797,7 +797,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
 ```
 
 **Binding values.** The dynamic PIN flow introduces three values across two messages that bind the PIN to the underlying Noise handshake:
@@ -859,7 +859,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to long_term_psk.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
@@ -911,7 +911,7 @@ To unwrap, the server decrypts `wrapped_psk` with the same AEAD, key `K_wrap`, a
 
 ### Protocol Errors
 
-A condition no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, a `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
+A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, a `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
 
 ### PIN-Pairing Lockout
 
