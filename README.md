@@ -676,7 +676,7 @@ Sending `stream/end` in these cases is explicitly prohibited because it signals 
 
 State update of the group this client is part of.
 
-Contains delta updates with only the changed fields. The client should merge these updates into existing state. Fields set to `null` should be cleared from the client's state.
+Contains delta updates with only the changed fields. The client should merge these updates into existing state.
 
 - `playback_state?`: 'playing' | 'stopped' - playback state of the group
 - `group_id?`: string - group identifier
