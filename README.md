@@ -33,7 +33,7 @@ All role names and versions not starting with `_` are reserved for future revisi
 
 Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
 
-The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
+The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. A server MUST NOT activate a role or version the client did not list in `supported_roles`. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
 
 Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
 
@@ -199,7 +199,7 @@ Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) a
 
 All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
 
-**Forward compatibility.** Clients MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](#application-specific-roles) objects a message explicitly permits.
+**Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](#application-specific-roles) objects a message explicitly permits.
 
 Message format example:
 
@@ -651,7 +651,7 @@ Request different stream format (upgrade or downgrade). Available for clients wi
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
-Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new format.
+Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new configuration. If the server cannot honor the request, the stream continues in a configuration the client supports, and the server MUST NOT treat the request as an error.
 
 Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
 
@@ -714,7 +714,7 @@ Upon receiving this message, the server should initiate the disconnect.
 
 - On a connection whose `activities` are empty, or include `'playback'`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
 - Otherwise, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
-- Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops when a long-term PSK has become invalid (e.g., after a client factory reset).
+- Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops when a long-term PSK has become invalid (e.g., after a client factory reset). After repeated consecutive failures, the server SHOULD NOT keep auto-reconnecting until there is reason to expect success (e.g., the operator re-initiates pairing or network conditions change).
 
 ## Pairing
 
@@ -1229,6 +1229,8 @@ The `player` object in [`stream/start`](#server--client-streamstart) has this st
   - `bit_depth`: integer - bit depth to be used
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
+The format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
+
 ### Server → Client: `stream/clear` player
 
 When [`stream/clear`](#server--client-streamclear) includes the player role, clients should clear all buffered audio chunks and continue with chunks received after this message.
@@ -1484,6 +1486,8 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
     - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
+
+**Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
 
 ### Server → Client: Artwork (Binary)
 
