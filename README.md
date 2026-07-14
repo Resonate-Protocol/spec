@@ -883,7 +883,7 @@ The PIN pairing flows use **CPACE-X25519-SHA512** as the PAKE construction, defi
 Sendspin instantiates CPace's inputs as follows:
 
 - `PRS` - the PIN as a UTF-8 byte string (the literal decimal digits - e.g., `0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38` for the PIN `"12345678"`).
-- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` || `h` || `counter`. `h` is the Noise handshake hash (32 bytes, raw) available immediately after Noise transport mode begins; `counter` is the number of pairing [`server/activate`](#server--client-serveractivate) messages sent since the last Noise handshake (`0` for the first attempt), encoded as a big-endian uint32 (4 bytes).
+- `sid` - the UTF-8 bytes `"sendspin-pair-pake-v1"` || `h` || `counter`. `h` is the Noise handshake hash (32 bytes, raw) available immediately after Noise transport mode begins; `counter` is the number of pairing [`server/activate`](#server--client-serveractivate) messages sent since the last Noise handshake, encoded as a big-endian uint32 (4 bytes).
 - `CI` - empty.
 - `ADa` - the UTF-8 bytes `"server"`.
 - `ADb` - the UTF-8 bytes `"client"`.
@@ -943,7 +943,7 @@ Starts the PIN-pairing [attempt](#entering-and-leaving-pairing). In static PIN, 
 
 A `pairing_index` lower than the server's own count is a leftover from a superseded pairing and is discarded silently; a higher value is a [protocol error](#protocol-errors). Only a match starts the attempt.
 
-- `pairing_index`: integer - the number of pairing [`server/activate`](#server--client-serveractivate) messages received since the last Noise handshake (`0` for the first attempt).
+- `pairing_index`: integer - the number of pairing [`server/activate`](#server--client-serveractivate) messages received since the last Noise handshake.
 - `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in [Dynamic PIN pairing](#dynamic-pin-pairing-flow); absent in [Static PIN pairing](#static-pin-pairing-flow). See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)
 
 #### Server → Client: `server/pair-init`
