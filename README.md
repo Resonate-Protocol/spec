@@ -10,6 +10,10 @@
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
+## Normative Language
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174).
+
 ## Protocol overview
 
 A typical session, from handshake through playback to disconnect:
@@ -122,11 +126,15 @@ Message object keys (e.g., `player?`, `controller?`) use unversioned role names.
 
 ### Detecting Outdated Servers
 
-Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports a newer version of the specification and the server needs to be updated.
+Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports newer role versions than the server and the server needs to be updated.
+
+This mechanism only detects role-version skew, and only because roles are exchanged after the handshake. A newer core `version`, cipher suite, or handshake (a cipher or handshake change is itself a core `version` bump) makes the [handshake](#failure-handling) abort before roles are exchanged, so that skew surfaces as a failed connection rather than through this role-request signal.
 
 ### Application-Specific Roles
 
 Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`. To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
+
+Their binary message IDs come from the unmanaged 192-255 range: an application-specific role's own definition assigns its IDs, and a client MUST NOT advertise two roles with conflicting IDs.
 
 ## Establishing a Connection
 
@@ -1118,6 +1126,8 @@ This section describes messages specific to clients with the `player` role, whic
 
 **Note:** To avoid audible clicks, clients SHOULD apply volume changes over a short ramp.
 
+**Note:** `volume` and `muted` are independent: a volume change (via [`server/command`](#server--client-servercommand), a group volume command, or device controls) MUST NOT clear the mute state.
+
 ### Client → Server: `client/hello` player@v1 support object
 
 The `player@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
@@ -1127,11 +1137,13 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
-    - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
+    - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 **Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+**Note:** For the initial [`stream/start`](#server--client-streamstart) the server SHOULD select the highest-priority `supported_formats` entry it can produce for the current track. It MAY select a lower-priority entry when warranted, for example to match a track's native sample rate and avoid resampling, and MAY switch formats on a later track by sending a new `stream/start`.
 
 **Note:** [`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players should report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Both should factor in expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients). Do not include `static_delay_ms` in these values; the server applies `static_delay_ms` separately when calculating send-ahead.
 
@@ -1145,6 +1157,14 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 - Servers may rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
+
+**Codec framing:** Each binary audio chunk carries whole codec units; a unit never spans chunks. Per codec:
+
+- `pcm`: any whole number of PCM frames (one frame = one sample across all channels), interleaved by channel, encoded per the convention above. `codec_header` is absent.
+- `flac`: one or more complete FLAC frames. `codec_header` is required and carries the `fLaC` stream marker followed by the STREAMINFO metadata block.
+- `opus`: exactly one Opus packet ([RFC 6716](https://www.rfc-editor.org/rfc/rfc6716)) per chunk, with no container. `codec_header` is absent; the decoder is configured from the negotiated `sample_rate` and `channels` in [`stream/start`](#server--client-streamstart).
+
+`codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
 ### Client → Server: `client/state` player object
 
@@ -1203,10 +1223,10 @@ Request the player to perform an action, e.g., change volume or mute state.
 The `player` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `player`: object
-  - `codec`: string - codec to be used
+  - `codec`: 'opus' | 'flac' | 'pcm' - codec to be used
   - `sample_rate`: integer - sample rate to be used
   - `channels`: integer - channels to be used
-  - `bit_depth`: integer - bit depth to be used
+  - `bit_depth`: integer - bit depth to be used; ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
 The format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
@@ -1253,7 +1273,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 - **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
-- After sending [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear) messages, servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)). For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)). An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
 - Servers factor in each client's [`static_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
 
 ### Suggested correction strategy
@@ -1285,9 +1305,9 @@ A device MAY implement both the `source` and `player` roles (e.g., a speaker wit
 
 **Note:** The `source` role (capturing input *into* Sendspin) is distinct from a client reporting [`available: false`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
 
-A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. Binary source audio messages are timestamped in the server time domain by converting the local capture time with the offset the time filter tracks.
+A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. It timestamps each binary source audio message in the server time domain by inverting the filter's server-to-local mapping (`t_local = compute_client_time(t_server)`): for a capture at local time `t_capture` it sends the `t_server` that maps to it. The mapping is linear in the filter's offset and drift, so this inverse is well-defined; apply both offset and drift, not offset alone.
 
-**Pairing required:** A source streams captured audio (potentially from a microphone or line-in) to the server, so it MUST only run on a paired connection ([trust level](#definitions) `user`). Servers MUST NOT activate `source@v1` over [unpaired access](#unpaired-access), and a source client MUST refuse to stream when the connection's trust level is `none`.
+**Pairing required:** A source captures potentially sensitive audio (microphone, line-in), so `source@v1` MUST only run on a paired connection ([trust level](#definitions) `user`) and a source client MUST NOT stream when the trust level is `none`. If a server activates `source@v1` at trust level `none`, the client refuses it and closes the connection, following the central rules in [`server/activate`](#server--client-serveractivate).
 
 ### Client → Server: `client/hello` source@v1 support object
 
@@ -1298,6 +1318,8 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `line_sense?`: boolean - true if source reports `signal`
 
 **Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+**Note:** A source announces its input format in [`client_stream/start`](#client--server-client_streamstart); there is no pre-negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept whatever format a source announces.
 
 ### Client → Server: `client/state` source object
 
@@ -1321,11 +1343,13 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 
 #### Default streaming behavior
 
-The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming.
+The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming. An unsolicited `client_stream/start` (received when the server has not issued `start`) is a protocol error: the server MUST NOT treat the input stream as open and should close the connection, consistent with the binary-chunk rejection rule below.
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
 When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `client_stream/end` and stops sending chunks.
+
+A source with an open input stream that becomes [`available: false`](#external-source-handling) sends `client_stream/end` before it reports `available: false` in `client/state`; the server treats the transition as an implicit `stop`.
 
 ### Client → Server: `client_stream/start`
 
@@ -1335,8 +1359,20 @@ The `client_stream/start` message announces the active input stream format and p
   - `codec`: 'opus' | 'flac' | 'pcm'
   - `channels`: integer
   - `sample_rate`: integer
-  - `bit_depth`: integer
+  - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
+
+A `client_stream/start` received while an input stream is already open replaces the stream format in place.
+
+**PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
+
+**Codec framing:** Each binary source audio chunk carries whole codec units; a unit never spans chunks. Per codec:
+
+- `pcm`: any whole number of PCM frames (one frame = one sample across all channels), interleaved by channel, encoded per the convention above. `codec_header` is absent.
+- `flac`: one or more complete FLAC frames. `codec_header` is required and carries the `fLaC` stream marker followed by the STREAMINFO metadata block.
+- `opus`: exactly one Opus packet ([RFC 6716](https://www.rfc-editor.org/rfc/rfc6716)) per chunk, with no container. `codec_header` is absent; the decoder is configured from the negotiated `sample_rate` and `channels` in `client_stream/start`.
+
+`codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
 ### Client → Server: `client_stream/end`
 
@@ -1407,7 +1443,7 @@ Control the group that's playing and switch groups. Only valid from clients with
 
 This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
-**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group.
+**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group. Group volume changes do not affect any player's `muted` state (see the [player role](#player-messages)).
 
 #### Switch command cycle
 
@@ -1434,9 +1470,9 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `shuffle`: boolean - shuffle mode enabled/disabled
   - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
 
-**Reading group volume:** Group volume is calculated as the average of all player volumes in the group.
+**Reading group volume:** Group volume is the average of the volumes of players in the group that support the `volume` command. Players without volume support are excluded from the calculation. If no player in the group supports `volume`, group volume is reported as 100 and `'volume'` is dropped from the controller `supported_commands`.
 
-**Reading group mute:** Group mute is `true` only when all players in the group are muted. If some players are muted and others are not, group mute is `false`.
+**Reading group mute:** Group mute is `true` only when all mute-supporting players in the group are muted. Players without mute support are excluded. If some supporting players are muted and others are not, group mute is `false`. If no player in the group supports `mute`, group mute is reported as `false` and `'mute'` is dropped from the controller `supported_commands`.
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
@@ -1471,6 +1507,8 @@ if metadata.progress.track_duration != 0:
 else:
     current_track_progress_ms = max(calculated_progress, 0)
 ```
+
+`current_time` and `metadata.timestamp` must share a clock domain. `metadata.timestamp` is in the server domain, so convert it to local time via the [time filter](#clock-synchronization) before subtracting the local `current_time` (converting `current_time` the other way is equivalent).
 
 ## Artwork messages
 This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
@@ -1514,11 +1552,15 @@ Response when an `artwork` stream is active: [`stream/start`](#server--client-st
 The `artwork` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `artwork`: object
-  - `channels`: object[] - configuration for each active artwork channel, array index is the channel number
+  - `channels`: object[] - configuration for each artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
+
+The `channels` array covers every channel index the client declared in [`artwork@v1_support`](#client--server-clienthello-artworkv1-support-object) in the same order. A channel the server is not streaming is represented as `source: 'none'`.
+
+Each channel's configuration MUST stay within the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by [`stream/request-format`](#client--server-streamrequest-format-artwork-object). The `source` and `format` MUST match the declaration, and `width`/`height` MUST NOT exceed the declared `media_width`/`media_height`.
 
 **Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
 
@@ -1536,7 +1578,7 @@ The message type determines which artwork channel this image is for:
 - Type `10`: Channel 2 (Artwork role, slot 2)
 - Type `11`: Channel 3 (Artwork role, slot 3)
 
-The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization.
+The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. A timestamp already in the past on arrival means the image is displayed immediately, unless a newer image for the same channel has already superseded it (latest wins). Artwork is never dropped for lateness.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
 
@@ -1566,10 +1608,10 @@ The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthel
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `visualizer`: object
-  - `types`: string[] - visualization data types the server will stream
-  - `rate_max`: integer - periodic frames per second the server will emit
+  - `types`: string[] - visualization data types the server will stream. MUST be a subset of the types the client requested (in [`client/hello`](#client--server-clienthello-visualizerv1-support-object) or the latest [`stream/request-format`](#client--server-streamrequest-format-visualizer-object))
+  - `rate_max`: integer - periodic frames per second the server will emit. MUST NOT exceed the client's requested `rate_max`
   - `tracks_downbeats`: boolean - only if `types` includes 'beat'. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
-  - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'
+  - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'. MUST match the client's current requested configuration
     - `n_disp_bins`: integer - number of display bins
     - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
     - `f_min`: integer - lowest frequency in Hz
@@ -1599,6 +1641,8 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
 - Remaining bytes: data, layout per type below
+
+Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.
 
 `loudness`, `spectrum` bins, and the `f_peak` amplitude use the full `uint16` range 0-65535, where 0 = silence and 65535 = full scale. Values are A-weighted and dB-scaled: -60 dB → 0, 0 dB → 65535, mapped linearly across that range.
 
