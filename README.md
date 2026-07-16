@@ -140,7 +140,9 @@ Their binary message IDs come from the unmanaged 192-255 range: an application-s
 
 Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
-Sendspin Servers must support both methods described below.
+Sendspin Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
+
+The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
 ### Server Initiated Connections
 
@@ -151,6 +153,8 @@ Clients announce their presence via mDNS using:
 - TXT record: `name` key specifying the friendly name of the player (optional)
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
+
+**Note:** The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
 **Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
@@ -171,7 +175,7 @@ When a new server connects, the client lets the handshake complete before applyi
 - A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
 - When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
 
-Subsequent `server/activate` updates do not trigger arbitration. A provisional connection that has not sent `server/activate` within 30 seconds is dropped.
+Subsequent `server/activate` updates do not trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
@@ -184,6 +188,8 @@ If clients prefer to initiate the connection instead of waiting for the server t
 - TXT record: `name` key specifying the friendly name of the server (optional)
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
+
+**Note:** The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
 **Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
@@ -203,7 +209,7 @@ Sendspin uses the `KKpsk2` Noise pattern. Both static keys are pre-known to both
 
 The **server is the Noise initiator**, the **client is the Noise responder**, regardless of which side initiated the WebSocket connection.
 
-**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions. Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
+**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions' transport traffic (the exception is the first handshake message's `psk_id` payload, recoverable with the client's static key). Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
 
 ### Cipher Suites
 
@@ -224,7 +230,7 @@ The `client_id` and `server_id` fields are the base64url-encoded (no padding) Cu
 
 ### Pre-Shared Key
 
-The PSK is mixed into the handshake state at the end of the second handshake message (the `psk2` modifier). The transport-mode keys derived after the handshake therefore include the PSK, but the first handshake message's payload (sent by the server) is encrypted under static-key DH only.
+The PSK is mixed into the handshake state at the end of the second handshake message (the `psk2` modifier). The transport-mode keys derived after the handshake therefore include the PSK, but the first handshake message's payload (sent by the server) is encrypted without the PSK mixed in.
 
 To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
 
@@ -233,6 +239,8 @@ psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 ```
 
 The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, Pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+
+The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would make a single wire `psk_id` map to two trust levels. Clients enforce this when records are configured (see [Management](#records)).
 
 The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
 
@@ -248,7 +256,7 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
                 = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
 ```
 
-The client decrypts the first handshake message's payload using only the static keys, compares the included `psk_id` to hashes of each of its candidate PSKs, and selects the PSK whose hash matches. It then mixes that PSK as required to process the second handshake message. If no candidate matches, the handshake fails.
+The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the handshake fails. A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is excluded from the candidate set, so a handshake referencing it fails as a lookup miss.
 
 Two storage variants are supported for long-term [Sendspin PSK](#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
 
@@ -259,13 +267,15 @@ Two storage variants are supported for long-term [Sendspin PSK](#definitions) re
 
 The prologue mixed into the Noise handshake state on both sides is the concatenation of the exact bytes of [`client/init`](#client--server-clientinit) followed by the exact bytes of [`server/init`](#server--client-serverinit), as transmitted on the wire (the JSON-encoded UTF-8 message body, without the WebSocket framing). This binds the cleartext init exchange to the handshake; tampering causes the handshake to fail.
 
+Both sides MUST hash the raw message bytes exactly as sent and received, not a re-encoding of the parsed message.
+
 ### Failure Handling
 
 Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
-The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust class after a successful [pairing](#pairing), to switch from Sentinel to a Pairing PSK, or to rotate session keys on long-running connections.
+The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust level after a successful [pairing](#pairing), to switch from Sentinel to a Pairing PSK, or to rotate session keys on long-running connections.
 
 The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) (the client re-asserts `trust_level`) → [`server/activate`](#server--client-serveractivate).
 
@@ -1013,6 +1023,8 @@ Add a pairing record directly.
 - `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](#definitions) (no padding)
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
 
+A `psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or the client's Pairing PSK; see [Pre-Shared Key](#pre-shared-key)) is rejected as `invalid`. The same PSK already present as a record is `already_exists`.
+
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
 #### Server → Client: `management/remove-record`
@@ -1075,9 +1087,12 @@ Modify pairing config.
 - `unpaired_access?`: object - see [Unpaired Access](#unpaired-access)
   - `enabled?`: boolean
 
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Setting fields on a method the client does not implement returns `invalid`.
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Two cases are rejected as `invalid`:
 
-Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`,  `storage_exhausted`.
+- fields set on a method the client does not implement
+- a `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](#pre-shared-key))
+
+Possible outcomes: `ok`, `permission_denied`, `invalid`, `storage_exhausted`.
 
 #### Record mode
 
@@ -1089,6 +1104,8 @@ When a server completes pairing via any method, the resulting record is created 
 The client creates a stored-pubkey record bound to the server, holding a freshly generated per-server [Sendspin PSK](#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
 
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
+
+The pre-provisioned record's PSK MUST be device-specific (randomly generated, unique per device) and MUST NOT be a fixed default shared across devices, mirroring the static-PIN rule in [Pairing](#pairing).
 
 ### Client → Server: `management/result`
 
@@ -1113,7 +1130,7 @@ Records (and, on some clients, operator-set pairing secrets) share one storage p
 - `cost_individual`: integer - what a new stored-pubkey record consumes.
 - `cost_shared`: integer - what a new shared-PSK record consumes.
 
-All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a kind can persist when `free` is at least its cost; `storage_exhausted` however stays authoritative.
+All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a given kind can persist when `free` is at least that kind's cost; `storage_exhausted` however stays authoritative.
 
 A secret set via [`set-pairing-config`](#server--client-managementset-pairing-config) may also draw on the pool but isn't covered by these costs.
 
