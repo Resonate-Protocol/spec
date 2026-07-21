@@ -7,7 +7,7 @@ includes), not README.md. Run `python3 tools/build-readme.py` to rebuild,
 
 template.md is the assembly root: the head of the document followed by
 `<!-- include: <path> -->` directives naming the source files to append, in
-order. HTML comments in template.md are dropped from the generated page. A
+order. HTML comments in any source file are dropped from the generated page. A
 `<!-- keep: ... -->` line marks the comment right after it to be emitted
 verbatim, which is how the generated-file banner reaches the top of README.md.
 """
@@ -87,13 +87,31 @@ def pieces_from_template(reader):
     return pieces
 
 
+def strip_comments(text):
+    """Drop HTML comments from a source file, keeping only a comment that a
+    `<!-- keep: ... -->` line immediately precedes."""
+    out, pos, keep_next = [], 0, False
+    for m in COMMENT_RE.finditer(text):
+        out.append(text[pos : m.start()])
+        pos = m.end()
+        inner = m.group(0)[4:-3].strip()
+        if inner.startswith("keep:"):
+            keep_next = True
+        elif keep_next:
+            out.append(m.group(0))  # emit this comment verbatim
+            keep_next = False
+        # otherwise the comment is dropped
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def generate(reader=_fs_read):
     rendered = []  # (repo-relative path or "", stripped text)
     for kind, val in pieces_from_template(reader):
         if kind == "inline":
             rendered.append(("", val.strip("\n")))
         else:
-            rendered.append((val, reader(val).strip("\n")))
+            rendered.append((val, strip_comments(reader(val)).strip("\n")))
 
     # Every heading's page anchor. Two headings sharing a slug would give GitHub
     # ambiguous anchors, so require them disambiguated at the source instead.
