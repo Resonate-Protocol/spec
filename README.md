@@ -1359,7 +1359,7 @@ The player renders decoded frames at their server timestamps translated to local
 ## Source messages
 This section describes messages specific to clients with the `source` role, which capture audio from a local input (e.g., AUX/line-in, turntable preamp, Bluetooth receiver, or microphone) and stream it to the server. Unlike other roles, a source sends audio to the server; the server remains the single place that resamples, transcodes, mixes, buffers, and distributes audio to output players. Sources stay simple: they capture and encode audio, optionally report basic signal presence (line sensing), and stream timestamped audio frames.
 
-A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin).
+A device MAY implement both the `source` and `player` roles (e.g., a speaker with a local AUX input forwarded into Sendspin). Such a device MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
 
 **Note:** The `source` role (capturing input *into* Sendspin) is distinct from a client reporting [`available: false`](#external-source-handling), which marks a client whose *output* has been taken over by a non-Sendspin system.
 
@@ -1396,12 +1396,16 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to begin streaming. The client SHOULD send `client_stream/start` and then send source audio chunks.
+  - `start`: server requests the source to begin streaming. The client SHOULD promptly send `client_stream/start` and then send source audio chunks.
   - `stop`: server requests the source to stop streaming. The client SHOULD send `client_stream/end` and stop sending source audio chunks.
+
+Both commands are idempotent: a `start` received while the input stream is open MUST NOT restart the stream, and a `stop` received while already stopped is ignored.
 
 #### Default streaming behavior
 
 The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming. An unsolicited `client_stream/start` (received when the server has not issued `start`) is a protocol error: the server MUST NOT treat the input stream as open and should close the connection, consistent with the binary-chunk rejection rule below.
+
+Streaming state is per-connection: a previously sent `start` does not survive reconnection, and a server that still wants the stream MUST send `command: "start"` again.
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
@@ -1439,17 +1443,17 @@ The client ends the current input stream. After this message, no more source aud
 ### Client → Server: Source Audio Chunks (Binary)
 
 Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client_stream/start` or after a `client_stream/end`) or the client is not [`available`](#client--server-clientstate).
-Clients MUST send `client_stream/start` before the first audio chunk.
+Clients MUST send `client_stream/start` before the first audio chunk. After the server sends `command: "stop"`, chunks may keep arriving until the client processes the command and sends `client_stream/end`; servers MUST tolerate these and MAY discard them.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
+The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). It is the best-effort time the audio reached the input (ADC). For codecs with encoder delay, it refers to the capture time of the first sample the decoder will emit for the chunk. The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
-A device that implements both `source` and `player` MUST NOT play its captured input locally. Like every player, it outputs only the stream the server distributes, so its output stays in sync with the rest of the group.
+A source MUST NOT send a chunk longer than 150 ms, and SHOULD NOT send one shorter than 5 ms (the final chunk before a `client_stream/end` MAY be shorter). After a network stall, clients SHOULD drop buffered backlog beyond a small bound and resume from live capture rather than burst stale audio.
 
-**Note:** Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous.
+**Note:** Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous. Servers SHOULD estimate the source's effective sample rate from the delivered sample stream and use timestamps to anchor the stream in time and to detect gaps and discontinuities, not as per-chunk cut points. Servers SHOULD absorb rate deviations by resampling, keeping the correction inaudible.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the Sendspin group this client is part of, and switch between groups.
