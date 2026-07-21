@@ -5,12 +5,18 @@
 `README.md` is a generated single-page rendering of the spec. Do not edit it
 directly. Edit the source files and rebuild:
 
-- `preamble.md` - title, overview diagram, definitions, role versioning
+- `template.md` - the document head (title, definitions, role versioning) plus
+  the assembly order
 - `connection.md`, `messaging.md`, `pairing.md`, `management.md`
 - `roles/<role>/<version>.md` - one file per role version
 
-The concatenation order lives in `tools/build-readme.py` (`ORDER`). Add a new
-source file there.
+`template.md` is the assembly root. It holds the head of the page and then
+lists the files to append with `<!-- include: <path> -->` directives, in order.
+To add a source file, place an `include` directive where it belongs.
+
+HTML comments are dropped from the generated page. A `<!-- keep: ... -->` line
+marks the comment right after it to be emitted verbatim (this is how the
+generated-file banner reaches the top of `README.md`).
 
 Cross-file Markdown links are written file-relative (e.g. `pairing.md#pairing`
 from a top-level file, `../../messaging.md#...` from a role file) and rewritten

@@ -1,3 +1,12 @@
+<!-- keep: the following comment is preserved verbatim as the generated-file banner at the top of README.md -->
+<!--
+  GENERATED FILE - do not edit directly.
+  README.md is generated from the split spec source .md files.
+  Edit those, not this file. Enable the pre-commit hook once with
+  `git config core.hooksPath .githooks` to keep README.md up to date
+  automatically. See CONTRIBUTING.md for details.
+-->
+
 # The Sendspin Protocol
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
@@ -44,3 +53,15 @@ Servers should track when clients request roles or role versions they don't impl
 ### Application-Specific Roles
 
 Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`. To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).
+
+<!-- include: connection.md -->
+<!-- include: messaging.md -->
+<!-- include: pairing.md -->
+<!-- include: management.md -->
+<!-- include: roles/player/v1.md -->
+<!-- include: roles/source/v1.md -->
+<!-- include: roles/controller/v1.md -->
+<!-- include: roles/metadata/v1.md -->
+<!-- include: roles/artwork/v1.md -->
+<!-- include: roles/visualizer/v1.md -->
+<!-- include: roles/color/v1.md -->

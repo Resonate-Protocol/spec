@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""Generate README.md by concatenating the split spec files into a single page.
+"""Generate README.md by assembling the split spec files into a single page.
 
-README.md is a build artifact. Edit the source files, not README.md.
-Run `python3 tools/build-readme.py` to rebuild, `--check` to verify it is in sync.
+README.md is a build artifact. Edit template.md (and the source files it
+includes), not README.md. Run `python3 tools/build-readme.py` to rebuild,
+`--check` to verify it is in sync.
+
+template.md is the assembly root: the head of the document followed by
+`<!-- include: <path> -->` directives naming the source files to append, in
+order. HTML comments are dropped from the generated page; a `<!-- keep: ... -->`
+line marks the comment right after it to be emitted verbatim (that is how the
+generated-file banner reaches the top of README.md).
 """
 
 import os
@@ -10,32 +17,10 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE = "template.md"
 
-# Concatenation order (the single-page section order).
-ORDER = [
-    "preamble.md",  # title, overview diagram, definitions, role versioning
-    "connection.md",
-    "messaging.md",
-    "pairing.md",
-    "management.md",
-    "roles/player/v1.md",
-    "roles/source/v1.md",
-    "roles/controller/v1.md",
-    "roles/metadata/v1.md",
-    "roles/artwork/v1.md",
-    "roles/visualizer/v1.md",
-    "roles/color/v1.md",
-]
-
-BANNER = (
-    "<!--\n"
-    "  GENERATED FILE - do not edit directly.\n"
-    "  README.md is generated from the split spec source .md files.\n"
-    "  Edit those, not this file. Enable the pre-commit hook once with\n"
-    "  `git config core.hooksPath .githooks` to keep README.md up to date\n"
-    "  automatically. See CONTRIBUTING.md for details.\n"
-    "-->\n"
-)
+COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+INCLUDE_RE = re.compile(r"include:\s*(\S+)\s*$")
 
 
 def slug(heading):
@@ -47,17 +32,55 @@ def headings(text):
     return re.findall(r"^#{1,6}\s+(.*)$", text, re.M)
 
 
+def read(rel):
+    return open(os.path.join(ROOT, rel), encoding="utf-8").read()
+
+
+def pieces_from_template():
+    """Ordered content pieces from template.md.
+
+    Each piece is ("inline", text) for prose or a kept comment, or ("file",
+    path) for an included source file. Dropped comments and the include/keep
+    directives themselves yield no piece.
+    """
+    text = read(TEMPLATE)
+    pieces, pos, keep_next = [], 0, False
+
+    def add_inline(chunk):
+        if chunk.strip():
+            pieces.append(("inline", chunk))
+
+    for m in COMMENT_RE.finditer(text):
+        add_inline(text[pos : m.start()])
+        pos = m.end()
+        inner = m.group(0)[4:-3].strip()
+        inc = INCLUDE_RE.match(inner)
+        if inner.startswith("keep:"):
+            keep_next = True
+        elif inc:
+            pieces.append(("file", inc.group(1)))
+            keep_next = False
+        elif keep_next:
+            pieces.append(("inline", m.group(0)))  # emit this comment verbatim
+            keep_next = False
+        # otherwise the comment is dropped
+    add_inline(text[pos:])
+    return pieces
+
+
 def generate():
-    texts = {
-        f: open(os.path.join(ROOT, f), encoding="utf-8").read().strip("\n")
-        for f in ORDER
-    }
+    rendered = []  # (repo-relative path or "", stripped text)
+    for kind, val in pieces_from_template():
+        if kind == "inline":
+            rendered.append(("", val.strip("\n")))
+        else:
+            rendered.append((val, read(val).strip("\n")))
 
     # Every heading's page anchor. Two headings sharing a slug would give GitHub
     # ambiguous anchors, so require them disambiguated at the source instead.
     anchors, dupes = set(), []
-    for f in ORDER:
-        for h in headings(texts[f]):
+    for _, txt in rendered:
+        for h in headings(txt):
             s = slug(h)
             if s in anchors:
                 dupes.append(s)
@@ -69,7 +92,7 @@ def generate():
         )
 
     # repo-relative path -> top-heading slug, for resolving anchorless file links
-    top = {f: slug(headings(texts[f])[0]) for f in ORDER}
+    top = {p: slug(headings(txt)[0]) for p, txt in rendered if p and headings(txt)}
     link_re = re.compile(r"\]\(([^)]+)\)")
 
     def rewrite_in(src_dir):
@@ -86,7 +109,7 @@ def generate():
         return rewrite
 
     body = "\n\n".join(
-        link_re.sub(rewrite_in(os.path.dirname(f)), texts[f]) for f in ORDER
+        link_re.sub(rewrite_in(os.path.dirname(p)), txt) for p, txt in rendered
     )
 
     dangling = sorted(
@@ -98,7 +121,7 @@ def generate():
             + ", ".join("#" + a for a in dangling)
         )
 
-    return BANNER + "\n" + body + "\n"
+    return body + "\n"
 
 
 def head_readme():
@@ -135,7 +158,7 @@ if __name__ == "__main__":
                 sys.exit(
                     "README.md is a generated file (see the banner at its top).\n"
                     "Your direct edits to README.md would be lost on rebuild.\n"
-                    "Put the change in the source files (preamble.md, *.md, roles/*/*.md),\n"
+                    "Put the change in template.md or the source files it includes,\n"
                     "or discard it with: git checkout -- README.md"
                 )
             open(readme, "w", encoding="utf-8", newline="\n").write(out)
