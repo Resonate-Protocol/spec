@@ -1,0 +1,46 @@
+# The Sendspin Protocol
+
+Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
+
+## Definitions
+
+- **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
+- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+  - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
+  - **Source** - captures audio from a local input and streams it to the server
+  - **Controller** - controls the Sendspin group this client is part of
+  - **Metadata** - displays text metadata (title, artist, album, etc.)
+  - **Artwork** - displays artwork images. Has preferred format for images
+  - **Visualizer** - visualizes music. Has preferred format for audio features
+  - **Color** - receives colors derived from the current audio
+- **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
+- **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](connection.md#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
+- **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](pairing.md#pairing) and mixed into the [Noise](connection.md#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](pairing.md#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](pairing.md#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value of variable length (see [Dynamic PIN Pairing Flow](pairing.md#dynamic-pin-pairing-flow)).
+- **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](pairing.md#unpaired-access) is enabled, normal playback and control flows.
+
+## Role Versioning
+
+Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
+
+This specification defines the following roles: [`player`](roles/player/v1.md#player-messages), [`source`](roles/source/v1.md#source-messages), [`controller`](roles/controller/v1.md#controller-messages), [`metadata`](roles/metadata/v1.md#metadata-messages), [`artwork`](roles/artwork/v1.md#artwork-messages), [`visualizer`](roles/visualizer/v1.md#visualizer-messages), [`color`](roles/color/v1.md#color-messages). All servers must implement all versions of these roles described in this specification.
+
+All role names and versions not starting with `_` are reserved for future revisions of this specification.
+
+### Priority and Activation
+
+Clients list roles in `supported_roles` in priority order (most preferred first). If a client supports multiple versions of a role, all should be listed: `["player@v2", "player@v1"]`.
+
+The server activates at most one version per role family (e.g., one `player@vN`, one `controller@vN`) - the first match it implements from the client's list, or none if server policy declines to activate that family. A server MUST NOT activate a role or version the client did not list in `supported_roles`. The server reports activated roles in `active_roles`; clients MUST consult it and refrain from sending commands or state for roles that aren't active.
+
+Message object keys (e.g., `player?`, `controller?`) use unversioned role names. The server determines the appropriate version from the client's `active_roles`.
+
+### Detecting Outdated Servers
+
+Servers should track when clients request roles or role versions they don't implement (excluding those starting with `_`). This indicates the client supports a newer version of the specification and the server needs to be updated.
+
+### Application-Specific Roles
+
+Custom roles outside the specification start with `_` (e.g., `_myapp_controller`, `_custom_display`). Application-specific roles can also be versioned: `_myapp_visualizer@v2`. To avoid collisions between independent vendors, custom role names SHOULD include a vendor-specific prefix (e.g., `_vendorname_role`).

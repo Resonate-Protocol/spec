@@ -1,0 +1,5 @@
+#!/bin/sh
+# Keeps README.md generated from the source files, and blocks accidental
+# direct edits to README.md. Enable once per clone with:
+#   git config core.hooksPath .githooks
+exec python3 tools/build-readme.py --precommit
