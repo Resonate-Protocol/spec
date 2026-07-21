@@ -5,8 +5,8 @@
 `README.md` is a generated single-page rendering of the spec. Do not edit it
 directly. Edit the source files and rebuild:
 
-- `template.md` - the document head (title, definitions, role versioning) plus
-  the assembly order
+- `template.md` - the document head (title, protocol overview, definitions,
+  role versioning) plus the assembly order
 - `connection.md`, `messaging.md`, `pairing.md`, `management.md`
 - `roles/<role>/<version>.md` - one file per role version
 
