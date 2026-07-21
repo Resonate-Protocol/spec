@@ -1698,7 +1698,7 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 
 - Byte 0: message type (uint8, one of the types listed below)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
-- Remaining bytes: data, layout per type below
+- Remaining bytes: data, layout per type below; all `uint16` fields are big-endian
 
 Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.
 
