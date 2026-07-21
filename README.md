@@ -1,3 +1,11 @@
+<!--
+  GENERATED FILE - do not edit directly.
+  README.md is generated from the split spec source .md files.
+  Edit those, not this file. Enable the pre-commit hook once with
+  `git config core.hooksPath .githooks` to keep README.md up to date
+  automatically. See CONTRIBUTING.md for details.
+-->
+
 # The Sendspin Protocol
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
@@ -63,7 +71,7 @@ The server discovers available clients through mDNS and connects to each client 
 
 **Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
-#### Multiple servers
+#### Multiple servers (server-initiated)
 
 A client holds at most one admitted connection at a time, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
 
@@ -96,7 +104,7 @@ Clients discover the server through mDNS and initiate a WebSocket connection usi
 
 **Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
-#### Multiple servers
+#### Multiple servers (client-initiated)
 
 Unlike server-initiated connections, servers cannot reclaim clients by reconnecting. How clients handle multiple discovered servers, server selection, and switching is implementation-defined.
 
@@ -522,7 +530,7 @@ The activity sets the server may legitimately declare are constrained by which P
 - If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `'pairing'` is in `activities` with a `selected_pair_method` the matched PSK disallows or the client does not currently offer - reply with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`, leaving the connection open. The check uses the live pairing configuration, which may have drifted from [`supported_pair_methods`](#client--server-clienthello); the server may re-activate, or [re-handshake](#re-handshake) for a fresh advertisement.
 
-**Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers)), so keeping an unused activity declared would degrade multi-server cooperation.
+**Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 
 **Note:** Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
@@ -728,7 +736,7 @@ This specification defines three pairing methods. Servers must implement all thr
 2. **Dynamic PIN** - pairing with a per-session [Sendspin Pairing PIN](#definitions); the client derives the PIN from a commit-and-reveal binding to the Noise handshake and emits it via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow).
 3. **Static PIN** - pairing with a fixed [Sendspin Pairing PIN](#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the PIN is disclosed. See [Static PIN Pairing Flow](#static-pin-pairing-flow).
 
-Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers)); the operator must stop playback before initiating pairing.
+Static pairing methods (Pairing PSK, static PIN) do not take over the device's out-channel. Dynamic pairing (dynamic PIN) takes over the out-channel - typically the audio output or display - to emit the per-session PIN, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pin` rather than `static_pin`. `static_pin` is intended only for devices that genuinely cannot emit a per-session value.
 
