@@ -34,7 +34,7 @@ Add a pairing record directly.
 - `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](README.md#definitions) (no padding)
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
 
-A `psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or the client's Pairing PSK; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `invalid`. The same PSK already present as a record is `already_exists`.
+A `psk` whose `psk_id` is already known, whether as a record or as the Sentinel PSK or the client's Pairing PSK (see [Pre-Shared Key](connection.md#pre-shared-key)), is rejected as `already_exists`.
 
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
@@ -98,12 +98,9 @@ Modify pairing config.
 - `unpaired_access?`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled?`: boolean
 
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Two cases are rejected as `invalid`:
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
 
-- fields set on a method the client does not implement
-- a `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key))
-
-Possible outcomes: `ok`, `permission_denied`, `invalid`, `storage_exhausted`.
+Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
 #### Record mode
 
