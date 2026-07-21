@@ -28,7 +28,7 @@ class BuildError(Exception):
 
 
 def slug(heading):
-    h = re.sub(r"[^a-z0-9 -]", "", heading.strip().lower())
+    h = re.sub(r"[^a-z0-9 _-]", "", heading.strip().lower())
     return h.strip().replace(" ", "-")
 
 
