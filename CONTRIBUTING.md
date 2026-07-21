@@ -14,9 +14,9 @@ directly. Edit the source files and rebuild:
 lists the files to append with `<!-- include: <path> -->` directives, in order.
 To add a source file, place an `include` directive where it belongs.
 
-HTML comments are dropped from the generated page. A `<!-- keep: ... -->` line
-marks the comment right after it to be emitted verbatim (this is how the
-generated-file banner reaches the top of `README.md`).
+HTML comments in `template.md` are dropped from the generated page. A
+`<!-- keep: ... -->` line marks the comment right after it to be emitted
+verbatim (this is how the generated-file banner reaches the top of `README.md`).
 
 Cross-file Markdown links are written file-relative (e.g. `pairing.md#pairing`
 from a top-level file, `../../messaging.md#...` from a role file) and rewritten
