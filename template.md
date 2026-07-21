@@ -11,6 +11,81 @@
 
 Sendspin is a multi-room music experience protocol. The goal of the protocol is to orchestrate all devices that make up the music listening experience. This includes outputting audio on multiple speakers simultaneously, screens and lights visualizing the audio or album art, and wall tablets providing media controls.
 
+## Protocol overview
+
+A typical session, from handshake through playback to disconnect:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+
+    Note over Client,Server: Noise handshake complete (see Communication)
+
+    Server->>Client: server/hello (name)
+    Client->>Server: client/hello (roles and capabilities)
+    Server->>Client: server/activate (activities, active_roles)
+
+    loop Continuous clock sync
+        Client->>Server: client/time (client clock)
+        Server->>Client: server/time (timing + offset info)
+    end
+
+    Note over Client,Server: Clock synchronization established
+    Client->>Server: client/state (available: true, player: volume, muted)
+
+    alt Stream starts
+        Server->>Client: stream/start (codec, format details)
+    end
+
+    Server->>Client: group/update (playback_state, group_id, group_name)
+    Server->>Client: server/state (metadata, controller, color)
+
+    loop During playback
+        alt Player role
+            Server->>Client: binary Type 4 (audio chunks with timestamps)
+        end
+        alt Artwork role
+            Server->>Client: binary Types 8-11 (artwork channels 0-3)
+        end
+        alt Visualizer role
+            Server->>Client: binary Types 16-20 (loudness, beat, f_peak, spectrum, peak)
+        end
+    end
+
+    alt Player requests format change
+        Client->>Server: stream/request-format (codec, sample_rate, etc)
+        Server->>Client: stream/start (player: new format)
+    end
+
+    alt Seek operation
+        Server->>Client: stream/clear (roles: [player, visualizer])
+    end
+
+    alt Track jump (skip to different track)
+        Server->>Client: stream/clear (roles: [player, visualizer])
+    end
+
+    alt Controller role
+        Client->>Server: client/command (controller: play/pause/seek/volume/switch/etc)
+    end
+
+    alt State changes
+        Client->>Server: client/state (state and/or player changes)
+    end
+
+    alt Server commands player
+        Server->>Client: server/command (player: volume, mute)
+    end
+
+    Server->>Client: stream/end (ends all role streams)
+
+    alt Graceful disconnect
+        Client->>Server: client/goodbye (reason)
+        Note over Client,Server: Server initiates disconnect
+    end
+```
+
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
