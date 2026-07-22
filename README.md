@@ -100,7 +100,7 @@ sequenceDiagram
 - **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 - **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
 - **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
-- **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server by copying a string or scanning a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server as a [pairing token](#pairing-token), copied as text or scanned as a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PIN** - a decimal-digit value used in PIN-based [pairing](#pairing) methods. The static-PIN method uses a fixed 8-digit value; the dynamic-PIN method uses a per-session generated value of variable length (see [Dynamic PIN Pairing Flow](#dynamic-pin-pairing-flow)).
 - **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
 
@@ -731,6 +731,44 @@ sequenceDiagram
 ```
 
 If a Sentinel-keyed connection is already open when the operator picks `pairing_psk`, the server first [re-handshakes](#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
+
+#### Pairing Token
+
+A server needs both the [Sendspin Pairing PSK](#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together as a **pairing token**: a single case-insensitive ASCII string the operator transfers out of band (copy/paste, QR scan, read aloud) into the server to begin the [Pairing PSK Flow](#pairing-psk-flow). A client offering `pairing_psk` SHOULD surface the token rather than the bare PSK.
+
+A token is a fixed `SP:` prefix, a version, and a base32-encoded body:
+
+```
+token   = "SP:" || version || body
+payload = client_key (32 bytes) || pairing_psk (32 bytes)
+```
+
+- `version` - a single decimal digit. This document defines version `1`.
+- `client_key` - the raw 32-byte Curve25519 public key whose base64url form is the [`client_id`](#identities).
+- `pairing_psk` - the raw 32-byte [Sendspin Pairing PSK](#definitions).
+
+The 64-byte `payload` becomes `body` by:
+
+1. base32-encoding it per [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-6) (alphabet `A–Z`, `2–7`),
+2. stripping the `=` padding, then
+3. transliterating every `2` to `9`.
+
+A version-1 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription.
+
+Decoding reverses the transform and MUST be lenient with operator-supplied input:
+
+1. Trim surrounding whitespace and upper-case it.
+2. If present, strip a leading `SP:`. The first character is the `version`; reject an unrecognized version.
+3. Transliterate every `9` back to `2`, re-pad with `=` to a multiple of 8 characters, and base32-decode.
+4. Reject the token unless the payload is exactly 64 bytes, then split it into `client_key` and `pairing_psk`.
+
+A decoder MUST reject malformed input. Before pairing, the server MUST confirm the decoded `client_key` matches the `client_id` presented on the connection.
+
+**Reference vector.** `client_key = 0x00 0x01 … 0x1f`, `pairing_psk = 0xe0 0xe1 … 0xff`:
+
+```
+SP:1AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO74HR6LZ7J5PW674PT6X37T6757Y
+```
 
 ### Dynamic PIN Pairing Flow
 
