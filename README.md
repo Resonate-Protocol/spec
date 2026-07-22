@@ -753,7 +753,7 @@ The 64-byte `payload` becomes `body` by:
 2. stripping the `=` padding, then
 3. transliterating every `2` to `9`.
 
-A version-1 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription.
+A version-1 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription. A QR code carries the token string verbatim, with no URI scheme or wrapper, so a scan and a copy/paste yield identical input.
 
 Decoding reverses the transform and MUST be lenient with operator-supplied input:
 
