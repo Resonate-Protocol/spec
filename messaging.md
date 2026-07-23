@@ -62,7 +62,8 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `000010xx` (8-11): Artwork role
 - `000011xx` (12-15): Source role
 - `00010xxx` (16-23): Visualizer role
-- Roles 6-47 (IDs 24-191): Reserved for future roles
+- `000110xx` (24-27): Announcement role
+- Roles 7-47 (IDs 28-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](README.md#application-specific-roles)
 
 **Message slots:**
@@ -178,10 +179,12 @@ Players that can output audio should have the role `player`.
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
+  - `announcement@v1` - plays short client-specific announcement audio (e.g., voice-assistant responses, chimes, alerts) alongside or independent of media playback
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](roles/player/v1.md#client--server-clienthello-playerv1-support-object))
 - `source@v1_support?`: object - only if `source@v1` is listed ([see source@v1 support object details](roles/source/v1.md#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](roles/artwork/v1.md#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](roles/visualizer/v1.md#client--server-clienthello-visualizerv1-support-object))
+- `announcement@v1_support?`: object - only if `announcement@v1` is listed ([see announcement@v1 support object details](roles/announcement/v1.md#client--server-clienthello-announcementv1-support-object))
 - `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](pairing.md#unpaired-access)
   - `enabled`: boolean
@@ -254,6 +257,7 @@ The initial message MUST include all state fields. In subsequent messages, the c
   - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](roles/player/v1.md#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
+- `announcement?`: object - only if client has `announcement` role ([see announcement state object details](roles/announcement/v1.md#client--server-clientstate-announcement-object))
 
 [Application-specific roles](README.md#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -323,6 +327,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 - `player?`: object - only sent to clients with the `player` role ([see player object details](roles/player/v1.md#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](roles/artwork/v1.md#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](roles/visualizer/v1.md#server--client-streamstart-visualizer-object))
+- `announcement?`: object - only sent to clients with the `announcement` role ([see announcement object details](roles/announcement/v1.md#server--client-streamstart-announcement-object))
 
 [Application-specific roles](README.md#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -333,7 +338,7 @@ The server MUST NOT send `stream/start` to a client that is not [`available`](#c
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
-- `roles?`: string[] - which roles to clear: '[player](roles/player/v1.md#server--client-streamclear-player)', '[visualizer](roles/visualizer/v1.md#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
+- `roles?`: string[] - which roles to clear: '[player](roles/player/v1.md#server--client-streamclear-player)', '[visualizer](roles/visualizer/v1.md#server--client-streamclear-visualizer)', '[announcement](roles/announcement/v1.md#server--client-streamclear-announcement)'. If omitted, clears the player and visualizer streams (a media seek); the announcement stream is cleared only when listed explicitly
 
 [Application-specific roles](README.md#application-specific-roles) may also be included in this array (names starting with `_`).
 
@@ -364,7 +369,7 @@ Ends the stream for one or more roles. When received, clients should stop output
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
-- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer', '[announcement](roles/announcement/v1.md#server--client-streamend-announcement)'). If omitted, ends all active streams (including an active announcement stream)
 
 [Application-specific roles](README.md#application-specific-roles) may also be included in this array (names starting with `_`).
 
