@@ -734,7 +734,7 @@ If a Sentinel-keyed connection is already open when the operator picks `pairing_
 
 #### Pairing Token
 
-A server needs both the [Sendspin Pairing PSK](#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together as a **pairing token**: a single case-insensitive ASCII string the operator transfers out of band (copy/paste, QR scan, read aloud) into the server to begin the [Pairing PSK Flow](#pairing-psk-flow). A client offering `pairing_psk` SHOULD surface the token rather than the bare PSK.
+A server needs both the [Sendspin Pairing PSK](#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together as a **pairing token**: a single case-insensitive ASCII string the operator transfers out of band (copy/paste, QR scan) into the server to begin the [Pairing PSK Flow](#pairing-psk-flow). A client offering `pairing_psk` SHOULD surface the token rather than the bare PSK.
 
 A token is a fixed `SP:` prefix, a version, and a base32-encoded body:
 
