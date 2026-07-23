@@ -302,7 +302,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
   - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
-  - `locked_out` (client) - the client is in [terminal lockout#pin-pairing-lockout) for the selected pairing method
+  - `locked_out` (client) - the client is in [terminal lockout](#pin-pairing-lockout) for the selected pairing method
   - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client does not currently offer
   - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
   - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the PIN binding check failed
