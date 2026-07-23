@@ -66,7 +66,7 @@ token   = "SP:" || version || body
 payload = client_key (32 bytes) || pairing_psk (32 bytes)
 ```
 
-- `version` - a single decimal digit. This document defines version `1`.
+- `version` - a single alphanumeric character. This document defines version `1`.
 - `client_key` - the raw 32-byte Curve25519 public key whose base64url form is the [`client_id`](connection.md#identities).
 - `pairing_psk` - the raw 32-byte [Sendspin Pairing PSK](README.md#definitions).
 
