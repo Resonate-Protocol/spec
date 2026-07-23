@@ -66,7 +66,7 @@ token   = "SP:" || version || body
 payload = client_key (32 bytes) || pairing_psk (32 bytes)
 ```
 
-- `version` - a single alphanumeric character. This document defines version `1`.
+- `version` - a single alphanumeric character. This document defines version `0`.
 - `client_key` - the raw 32-byte Curve25519 public key whose base64url form is the [`client_id`](connection.md#identities).
 - `pairing_psk` - the raw 32-byte [Sendspin Pairing PSK](README.md#definitions).
 
@@ -76,7 +76,7 @@ The 64-byte `payload` becomes `body` by:
 2. stripping the `=` padding, then
 3. transliterating every `2` to `9`.
 
-A version-1 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription. A QR code carries the token string verbatim, with no URI scheme or wrapper, so a scan and a copy/paste yield identical input.
+A version-0 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription. A QR code carries the token string verbatim, with no URI scheme or wrapper, so a scan and a copy/paste yield identical input.
 
 Decoding reverses the transform and MUST be lenient with operator-supplied input:
 
@@ -90,7 +90,7 @@ A decoder MUST reject malformed input. Before pairing, the server MUST confirm t
 **Reference vector.** `client_key = 0x00 0x01 … 0x1f`, `pairing_psk = 0xe0 0xe1 … 0xff`:
 
 ```
-SP:1AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO74HR6LZ7J5PW674PT6X37T6757Y
+SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO74HR6LZ7J5PW674PT6X37T6757Y
 ```
 
 ### Dynamic PIN Pairing Flow
