@@ -55,6 +55,44 @@ sequenceDiagram
 
 If a Sentinel-keyed connection is already open when the operator picks `pairing_psk`, the server first [re-handshakes](connection.md#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
 
+#### Pairing Token
+
+A server needs both the [Sendspin Pairing PSK](README.md#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together as a **pairing token**: a single case-insensitive ASCII string the operator transfers out of band (copy/paste, QR scan) into the server to begin the [Pairing PSK Flow](#pairing-psk-flow). A client offering `pairing_psk` SHOULD surface the token rather than the bare PSK.
+
+A token is a fixed `SP:` prefix, a version, and a base32-encoded body:
+
+```
+token   = "SP:" || version || body
+payload = client_key (32 bytes) || pairing_psk (32 bytes)
+```
+
+- `version` - a single alphanumeric character. This document defines version `0`.
+- `client_key` - the raw 32-byte Curve25519 public key whose base64url form is the [`client_id`](connection.md#identities).
+- `pairing_psk` - the raw 32-byte [Sendspin Pairing PSK](README.md#definitions).
+
+The 64-byte `payload` becomes `body` by:
+
+1. base32-encoding it per [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-6) (alphabet `A–Z`, `2–7`),
+2. stripping the `=` padding, then
+3. transliterating every `2` to `9`.
+
+A version-0 token is 107 characters drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`), so it renders as a compact QR code and survives manual transcription. A QR code carries the token string verbatim, with no URI scheme or wrapper, so a scan and a copy/paste yield identical input.
+
+Decoding reverses the transform and MUST be lenient with operator-supplied input:
+
+1. Trim surrounding whitespace and upper-case it.
+2. If present, strip a leading `SP:`. The first character is the `version`; reject an unrecognized version.
+3. Transliterate every `9` back to `2`, re-pad with `=` to a multiple of 8 characters, and base32-decode.
+4. Reject the token unless the payload is exactly 64 bytes, then split it into `client_key` and `pairing_psk`.
+
+A decoder MUST reject malformed input. Before pairing, the server MUST confirm the decoded `client_key` matches the `client_id` presented on the connection.
+
+**Reference vector.** `client_key = 0x00 0x01 … 0x1f`, `pairing_psk = 0xe0 0xe1 … 0xff`:
+
+```
+SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO74HR6LZ7J5PW674PT6X37T6757Y
+```
+
 ### Dynamic PIN Pairing Flow
 
 Pairing with a per-session PIN derived from the Noise handshake and emitted by the client via its out-channel. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides.
