@@ -50,6 +50,11 @@ sequenceDiagram
         alt Visualizer role
             Server->>Client: binary Types 16-20 (loudness, beat, f_peak, spectrum, peak)
         end
+        alt Announcement role
+            Server->>Client: stream/start (announcement: format, ducking)
+            Server->>Client: binary Type 24 (announcement chunks)
+            Server->>Client: stream/end (roles: [announcement])
+        end
     end
 
     alt Player requests format change
@@ -88,7 +93,7 @@ sequenceDiagram
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color, announcement). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Source** - captures audio from a local input and streams it to the server
   - **Controller** - controls the Sendspin group this client is part of
@@ -96,6 +101,7 @@ sequenceDiagram
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
   - **Color** - receives colors derived from the current audio
+  - **Announcement** - plays short client-specific announcement audio (voice-assistant responses, chimes, alerts) alongside or independent of media playback, optionally ducking the media
 - **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 - **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
@@ -108,7 +114,7 @@ sequenceDiagram
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](#player-messages), [`source`](#source-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](#player-messages), [`source`](#source-messages), [`controller`](#controller-messages), [`metadata`](#metadata-messages), [`artwork`](#artwork-messages), [`visualizer`](#visualizer-messages), [`color`](#color-messages), [`announcement`](#announcement-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -325,7 +331,8 @@ Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for
 - `000010xx` (8-11): Artwork role
 - `000011xx` (12-15): Source role
 - `00010xxx` (16-23): Visualizer role
-- Roles 6-47 (IDs 24-191): Reserved for future roles
+- `000110xx` (24-27): Announcement role
+- Roles 7-47 (IDs 28-191): Reserved for future roles
 - Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
 
 **Message slots:**
@@ -441,10 +448,12 @@ Players that can output audio should have the role `player`.
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
   - `color@v1` - receives colors derived from the current audio
+  - `announcement@v1` - plays short client-specific announcement audio (e.g., voice-assistant responses, chimes, alerts) alongside or independent of media playback
 - `player@v1_support?`: object - only if `player@v1` is listed ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `source@v1_support?`: object - only if `source@v1` is listed ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - only if `artwork@v1` is listed ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - only if `visualizer@v1` is listed ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
+- `announcement@v1_support?`: object - only if `announcement@v1` is listed ([see announcement@v1 support object details](#client--server-clienthello-announcementv1-support-object))
 - `supported_pair_methods?`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
   - `enabled`: boolean
@@ -517,6 +526,7 @@ The initial message MUST include all state fields. In subsequent messages, the c
   - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
+- `announcement?`: object - only if client has `announcement` role ([see announcement state object details](#client--server-clientstate-announcement-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -586,6 +596,7 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 - `player?`: object - only sent to clients with the `player` role ([see player object details](#server--client-streamstart-player-object))
 - `artwork?`: object - only sent to clients with the `artwork` role ([see artwork object details](#server--client-streamstart-artwork-object))
 - `visualizer?`: object - only sent to clients with the `visualizer` role ([see visualizer object details](#server--client-streamstart-visualizer-object))
+- `announcement?`: object - only sent to clients with the `announcement` role ([see announcement object details](#server--client-streamstart-announcement-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -596,7 +607,7 @@ The server MUST NOT send `stream/start` to a client that is not [`available`](#c
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
-- `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
+- `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', '[announcement](#server--client-streamclear-announcement)'. If omitted, clears the player and visualizer streams (a media seek); the announcement stream is cleared only when listed explicitly
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
@@ -627,7 +638,7 @@ Ends the stream for one or more roles. When received, clients should stop output
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
 - `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
-- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
+- `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer', '[announcement](#server--client-streamend-announcement)'). If omitted, ends all active streams (including an active announcement stream)
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
 
@@ -1688,3 +1699,131 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
   - `accent?`: integer[] | null - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
   - `on_dark?`: integer[] | null - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
   - `on_light?`: integer[] | null - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
+
+## Announcement messages
+This section describes messages specific to clients with the `announcement` role: short, client-specific audio clips (voice-assistant responses, doorbell chimes, alerts) delivered as their own stream, independent of the `player` role's media stream. An announcement can play while media is playing (mixed over it, optionally ducking the media) or while nothing is playing at all. Media playback is never paused or interrupted by an announcement, so a grouped player's media timeline stays untouched while it plays one.
+
+Announcements are addressed per client, and each targeted client ducks and mixes its own output. To announce on several speakers (a room, or everywhere), the server starts one announcement stream per targeted client - and since chunks carry absolute timestamps, it can schedule the same start time on all of them for a coordinated start. Which speakers to target is the user's/server's choice, not a protocol property; sample-accurate cross-client sync of announcement audio is out of scope.
+
+The `announcement` role is optional for clients. It is typically advertised together with `player@v1`, but a client MAY advertise it standalone (e.g., a notification-only device).
+
+**Note:** As with the player role, volume values (0-100) represent perceived loudness. Clients SHOULD convert volume to a linear amplitude as `amplitude = (volume / 100)^1.5`, applied over a short ramp.
+
+### Client → Server: `client/hello` announcement@v1 support object
+
+The `announcement@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+
+- `announcement@v1_support`: object
+  - `supported_formats`: object[] - list of supported announcement audio formats in priority order (first is preferred)
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `channels`: integer - supported number of channels (e.g., 1 = mono, 2 = stereo)
+    - `sample_rate`: integer - sample rate in Hz (e.g., 48000)
+    - `bit_depth`: integer - bit depth for this format (e.g., 16, 24)
+  - `buffer_capacity`: integer - max size in bytes of compressed announcement audio in the buffer that is yet to be played
+
+**Note:** Announcements decode on a second, concurrent pipeline next to the media stream, so clients SHOULD advertise inexpensive formats here (e.g., mono, 16-bit, modest sample rates). Both the format list and `buffer_capacity` are independent of the player role's. Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+
+### Client → Server: `client/state` announcement object
+
+The `announcement` object in [`client/state`](#client--server-clientstate) informs the server of announcement-specific state. Only for clients with the `announcement` role. All fields are optional and purely informational - the server derives announcement completion from the stream timeline regardless (see [Server behavior for announcements](#server-behavior-for-announcements)) - so a minimal client MAY never send this object.
+
+- `announcement`: object
+  - `state?`: 'playing' | 'idle' - whether announcement audio is currently being output. SHOULD be sent on transitions
+  - `required_lead_time_ms?`: integer - minimum startup lead time in milliseconds for the announcement pipeline (codec init, decode warmup, mixer attach), measured like the player's [`required_lead_time_ms`](#client--server-clientstate-player-object). When absent, the server SHOULD assume a conservative default (500 ms is recommended)
+
+### Server → Client: `stream/start` announcement object
+
+The `announcement` object in [`stream/start`](#server--client-streamstart) has this structure:
+
+- `announcement`: object
+  - `codec`: string - codec to be used
+  - `sample_rate`: integer - sample rate to be used
+  - `channels`: integer - channels to be used
+  - `bit_depth`: integer - bit depth to be used
+  - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
+  - `media_duck_db?`: integer - reduction in decibel (range 0-50, default 0) to apply to this client's own media output while the announcement stream is active. 0 means no ducking
+  - `duck_ramp_ms?`: integer - ramp duration in milliseconds (range 0-2000, default 100) for both applying and releasing the ducking
+  - `volume?`: integer - range 0-100. When present, the client SHOULD render the announcement at the loudness that master volume `volume` would produce, regardless of the current master volume (see [Mixing and Ducking](#mixing-and-ducking)). When absent, the announcement follows the current master volume
+
+The format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-announcementv1-support-object).
+
+Re-sending `stream/start` with an `announcement` object while an announcement stream is active updates the configuration without clearing buffers (e.g., to change the duck level mid-announcement); a new `media_duck_db` target ramps from the current gain. To replace the announcement audio itself, the server MUST first send [`stream/clear`](#server--client-streamclear) listing the `announcement` role.
+
+### Server → Client: `stream/clear` announcement
+
+When [`stream/clear`](#server--client-streamclear) explicitly lists the `announcement` role, clients drop all buffered announcement audio and continue with announcement chunks received after this message. The stream and the ducking state stay active. A `stream/clear` that omits the `roles` field is a media seek and does NOT affect the announcement stream.
+
+### Server → Client: `stream/end` announcement
+
+When [`stream/end`](#server--client-streamend) lists the `announcement` role (or omits `roles`, which ends all active streams), the announcement stream is over: clients stop announcement output, discard any remaining buffered announcement audio, release the ducking (ramped over `duck_ramp_ms`), and report `state: 'idle'` if they report announcement state.
+
+### Server → Client: Announcement Chunks (Binary)
+
+Binary messages SHOULD be rejected if there is no active announcement stream or the client is not [`available`](#client--server-clientstate).
+
+- Byte 0: message type `24` (uint8)
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
+- Rest of bytes: encoded audio frame
+
+Chunk timestamps within one announcement stream MUST be contiguous and monotonically increasing: each chunk starts where the previous one ended. Servers MUST NOT emit timestamp gaps; when announcement audio is produced slower than real time (e.g., streaming text-to-speech), the server pads with encoded silence, or rebases via [`stream/clear`](#server--client-streamclear-announcement).
+
+Unlike media audio, announcement chunks are not sync-critical and MUST NOT be dropped for being late: the client SHOULD begin output at the first chunk's timestamp (translated via [clock synchronization](#clock-synchronization)), or as soon as possible if that time has passed, and plays mid-stream chunks continuously in order. The [player sync accuracy rules](#playback-synchronization) do not apply to announcement output.
+
+## Announcement Playback Behavior
+
+### Mixing and Ducking
+
+A client with both an active media stream and an active announcement stream outputs both concurrently, mixed locally. The gain stages are ordered as follows:
+
+1. `media_duck_db` applies to the media signal only, before mixing.
+2. The announcement `volume` (when present) applies to the announcement signal only, before mixing. Since master volume is applied after the mix, the client compensates the announcement gain so the announcement is rendered at the loudness that master volume `volume` would produce. Implementations MAY snapshot the master volume at announcement start for this compensation.
+3. The master volume and mute of the [player role](#client--server-clientstate-player-object) apply to the mixed output. Announcements are therefore silenced on a muted client.
+
+Starting an announcement stream MUST NOT pause, stop, mute, or shift the timeline of the client's media stream - ducking is a gain change only. This keeps a grouped client's media playback sample-identical with its group while it plays an announcement.
+
+Clients that cannot apply a fractional gain reduction MAY implement any non-zero `media_duck_db` as full attenuation of the media signal (duck to silence). Ducking is a no-op while no media is playing locally, and the role works without a `player` role active.
+
+### Announcement Lifecycle
+
+- At most one announcement stream is active per client at a time.
+- Ducking is bound to the local announcement stream lifetime: it is released (ramped) when the stream ends, is aborted, or the transport drops - a broken connection never leaves media ducked.
+- Announcement streams are ephemeral: after transport loss they MUST NOT be resumed or replayed. There is no late-join or catch-up for announcement audio.
+- If an active announcement stream stalls (buffer drained and no data arriving), the client MAY locally end it after a timeout (5 seconds is recommended), releasing the ducking and reporting `state: 'idle'`.
+
+### Interaction with Media, Groups, and Other Roles
+
+- Announcement streams are independent of group membership and of the media stream lifecycle: group changes, media `stream/start`, media-scoped `stream/clear`, and media `stream/end` do not affect an active announcement stream (ducking simply becomes a no-op when media ends). [`group/update`](#server--client-groupupdate) describes the media group only.
+- Announcement audio MUST NOT be reflected in visualizer or color output, and does not alter metadata or artwork state - those roles describe the media stream only.
+- There is no `stream/request-format` for the announcement role: the server picks a fresh format from the client's `supported_formats` for every announcement.
+
+### Server behavior for announcements
+
+- The server MUST NOT send any announcement-scoped message (`stream/start` with an `announcement` object, `stream/clear`/`stream/end` listing `announcement`, or type `24` binary) to a client whose `active_roles` do not include the announcement role.
+- The chunk duration bounds of the player role apply (15-150 ms; see [Server Audio Send Constraints](#server-audio-send-constraints)).
+- The first chunk's timestamp SHOULD be at least the client's announcement `required_lead_time_ms` (or the 500 ms default) past the `stream/start` server transmit time.
+- `buffer_capacity` is a hard per-client byte limit on outstanding un-played compressed announcement audio.
+- The server knows when the announcement has finished playing from its own timeline (the last chunk's end timestamp). For normal completion it SHOULD NOT send `stream/end` for the announcement role before that time has passed; sending it earlier is the abort path.
+- Announcements ride the client's admitted connection: the server allowed to stream media may announce. Letting a *second* server (e.g. a voice assistant) announce while another server streams media requires announcement-capable secondary connections in the [connection admission model](#multiple-servers-server-initiated) - a companion change tracked separately from this role.
+- There is no negative acknowledgement; a client MAY silently ignore an announcement stream it cannot currently service.
+
+### Example: announcement during grouped playback
+
+```mermaid
+sequenceDiagram
+    participant Server
+    participant ClientA as Client A (grouped)
+    participant ClientB as Client B (grouped)
+
+    Note over Server,ClientB: Both clients play the same synchronized media stream
+    Server->>ClientA: stream/start (announcement: opus mono, media_duck_db: 20)
+    Server->>ClientA: binary Type 24 (announcement chunks)
+    Note over ClientA: Ducks its own media by 20 dB (ramped),<br/>mixes announcement over it
+    Note over ClientB: Unaffected, media continues
+    Server->>ClientA: binary Type 4 (media chunks keep flowing to both)
+    Server->>ClientB: binary Type 4
+    ClientA->>Server: client/state (announcement: playing)
+    Note over Server: Last announcement chunk's end timestamp passes
+    Server->>ClientA: stream/end (roles: [announcement])
+    Note over ClientA: Releases ducking (ramped), media at full level again
+    ClientA->>Server: client/state (announcement: idle)
+```

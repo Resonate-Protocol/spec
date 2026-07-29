@@ -51,6 +51,11 @@ sequenceDiagram
         alt Visualizer role
             Server->>Client: binary Types 16-20 (loudness, beat, f_peak, spectrum, peak)
         end
+        alt Announcement role
+            Server->>Client: stream/start (announcement: format, ducking)
+            Server->>Client: binary Type 24 (announcement chunks)
+            Server->>Client: stream/end (roles: [announcement])
+        end
     end
 
     alt Player requests format change
@@ -89,7 +94,7 @@ sequenceDiagram
 ## Definitions
 
 - **Sendspin Server** - orchestrates all devices, generates audio streams, manages players and clients, provides metadata
-- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color). Every client has a unique identifier
+- **Sendspin Client** - a client that can play audio, capture audio inputs, visualize audio, display metadata, display colors, or provide music controls. Has different possible roles (player, source, metadata, controller, artwork, visualizer, color, announcement). Every client has a unique identifier
   - **Player** - receives audio and plays it in sync. Has its own volume and mute state and preferred format settings
   - **Source** - captures audio from a local input and streams it to the server
   - **Controller** - controls the Sendspin group this client is part of
@@ -97,6 +102,7 @@ sequenceDiagram
   - **Artwork** - displays artwork images. Has preferred format for images
   - **Visualizer** - visualizes music. Has preferred format for audio features
   - **Color** - receives colors derived from the current audio
+  - **Announcement** - plays short client-specific announcement audio (voice-assistant responses, chimes, alerts) alongside or independent of media playback, optionally ducking the media
 - **Sendspin Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Sendspin Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 - **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](connection.md#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
@@ -109,7 +115,7 @@ sequenceDiagram
 
 Roles define what capabilities and responsibilities a client has. All roles use explicit versioning with the `@` character: `<role>@<version>` (e.g., `player@v1`, `controller@v1`).
 
-This specification defines the following roles: [`player`](roles/player/v1.md#player-messages), [`source`](roles/source/v1.md#source-messages), [`controller`](roles/controller/v1.md#controller-messages), [`metadata`](roles/metadata/v1.md#metadata-messages), [`artwork`](roles/artwork/v1.md#artwork-messages), [`visualizer`](roles/visualizer/v1.md#visualizer-messages), [`color`](roles/color/v1.md#color-messages). All servers must implement all versions of these roles described in this specification.
+This specification defines the following roles: [`player`](roles/player/v1.md#player-messages), [`source`](roles/source/v1.md#source-messages), [`controller`](roles/controller/v1.md#controller-messages), [`metadata`](roles/metadata/v1.md#metadata-messages), [`artwork`](roles/artwork/v1.md#artwork-messages), [`visualizer`](roles/visualizer/v1.md#visualizer-messages), [`color`](roles/color/v1.md#color-messages), [`announcement`](roles/announcement/v1.md#announcement-messages). All servers must implement all versions of these roles described in this specification.
 
 All role names and versions not starting with `_` are reserved for future revisions of this specification.
 
@@ -140,3 +146,4 @@ Custom roles outside the specification start with `_` (e.g., `_myapp_controller`
 <!-- include: roles/artwork/v1.md -->
 <!-- include: roles/visualizer/v1.md -->
 <!-- include: roles/color/v1.md -->
+<!-- include: roles/announcement/v1.md -->
