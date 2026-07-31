@@ -34,6 +34,8 @@ Add a pairing record directly.
 - `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](README.md#definitions) (no padding)
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
 
+A `psk` whose `psk_id` is already known, whether as a record or as the Sentinel PSK or the client's Pairing PSK (see [Pre-Shared Key](connection.md#pre-shared-key)), is rejected as `already_exists`.
+
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
 #### Server → Client: `management/remove-record`
@@ -96,9 +98,9 @@ Modify pairing config.
 - `unpaired_access?`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled?`: boolean
 
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Setting fields on a method the client does not implement returns `invalid`.
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
 
-Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`,  `storage_exhausted`.
+Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
 #### Record mode
 
@@ -110,6 +112,8 @@ When a server completes pairing via any method, the resulting record is created 
 The client creates a stored-pubkey record bound to the server, holding a freshly generated per-server [Sendspin PSK](README.md#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
 
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
+
+The pre-provisioned record's PSK MUST be device-specific (randomly generated, unique per device) and MUST NOT be a fixed default shared across devices, mirroring the static-PIN rule in [Pairing](pairing.md#pairing).
 
 ### Client → Server: `management/result`
 
@@ -134,7 +138,7 @@ Records (and, on some clients, operator-set pairing secrets) share one storage p
 - `cost_individual`: integer - what a new stored-pubkey record consumes.
 - `cost_shared`: integer - what a new shared-PSK record consumes.
 
-All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a kind can persist when `free` is at least its cost; `storage_exhausted` however stays authoritative.
+All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a given kind can persist when `free` is at least that kind's cost; `storage_exhausted` however stays authoritative.
 
 A secret set via [`set-pairing-config`](#server--client-managementset-pairing-config) may also draw on the pool but isn't covered by these costs.
 
