@@ -756,7 +756,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure and does not touch the [lockout counter](#pin-pairing-lockout). Servers SHOULD apply their own timeout while waiting for [`client/pair-init`](#client--server-clientpair-init) in the static-PIN flow, cancelling the attempt as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure and does not touch the [lockout counter](#pin-pairing-lockout). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for [`client/pair-init`](#client--server-clientpair-init) in the static-PIN flow, cancelling the attempt as above on expiry.
 
 ### Unpaired Access
 
@@ -1029,7 +1029,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
   - `method_not_supported` (client) - the server's activity set and `selected_pair_method` are not a permitted combination for the matched PSK, or `selected_pair_method` names a method the client does not currently offer
   - `pin_length_unacceptable` (client) - the `pin_length` in [`server/pair-init`](#server--client-serverpair-init) is below the client's `min_pin_length` or outside the 4–12 range
   - `pin_mismatch` (client or server) - PAKE key-confirmation failed, or (in dynamic PIN pairing) the PIN binding check failed
-  - `user_cancelled` (client) - operator aborted the pairing through a local UI
+  - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
 
 ## Management
 
