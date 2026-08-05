@@ -64,11 +64,10 @@ On success, `data` is shaped as:
   - `enabled`: boolean
 - `static_pin?`: object
   - `enabled`: boolean
-  - `locked_out`: boolean - `true` when the method is in [terminal lockout](pairing.md#pin-pairing-lockout)
 - `dynamic_pin?`: object
   - `enabled`: boolean
   - `min_pin_length`: integer - the shortest dynamic PIN length in digits the client will accept (4–12); see [PIN length](pairing.md#dynamic-pin-pairing-flow)
-  - `locked_out`: boolean - `true` when the method is in [terminal lockout](pairing.md#pin-pairing-lockout)
+  - `escalated`: boolean - `true` when the method is [escalated](pairing.md#failure-counter) to gesture-gating by its failure counter
 - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled`: boolean
@@ -89,16 +88,14 @@ Modify pairing config.
 - `static_pin?`: object
   - `enabled?`: boolean
   - `pin?`: string - 8 decimal digits; replaces the configured static PIN
-  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](pairing.md#pin-pairing-lockout)
 - `dynamic_pin?`: object
   - `enabled?`: boolean
   - `min_pin_length?`: integer - the shortest dynamic PIN length in digits the client will accept; must be in 4–12 range. See [PIN length](pairing.md#dynamic-pin-pairing-flow)
-  - `locked_out?`: boolean - only `false` is accepted; clears the failure counter and exits [terminal lockout](pairing.md#pin-pairing-lockout)
 - `record_mode?`: object - see [Record mode](#record-mode)
 - `unpaired_access?`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled?`: boolean
 
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. Enabling `static_pin` with no static PIN configured and none supplied in the same request is likewise rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
 
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
@@ -114,6 +111,16 @@ The client creates a stored-pubkey record bound to the server, holding a freshly
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
 
 The pre-provisioned record's PSK MUST be device-specific (randomly generated, unique per device) and MUST NOT be a fixed default shared across devices.
+
+### Server → Client: `management/open-pairing-window`
+
+Opens a [pairing window](pairing.md#pairing-window) in place of the operator gesture.
+
+No payload fields.
+
+A no-op `ok` when a window is already open; rejected as `invalid` when no PIN method is enabled.
+
+Possible outcomes: `ok`, `permission_denied`, `invalid`.
 
 ### Client → Server: `management/result`
 
