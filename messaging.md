@@ -210,6 +210,7 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
   - `pin_length?`: integer - the dynamic [PIN length](pairing.md#dynamic-pin-pairing-flow) for this session. Required when `method` is `'dynamic_pin'`; absent otherwise.
+  - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/rfc/rfc5646) language tags in descending operator preference (e.g. `["ca", "es", "en"]`), for spoken [PIN emission](pairing.md#dynamic-pin-pairing-flow). Optional when `method` is `'dynamic_pin'`; absent otherwise.
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](connection.md#encryption):
 
