@@ -191,7 +191,7 @@ Players that can output audio should have the role `player`.
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](roles/source/v1.md#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](roles/artwork/v1.md#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](roles/visualizer/v1.md#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object[] - pairing methods this client offers, each described by a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). Every client implements at least the Pairing PSK method (see [Pairing](pairing.md#pairing)).
+- `supported_pair_methods`: object[] - pairing methods this client currently offers, each described by a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). An implemented method that is [disabled](management.md#server--client-managementset-pairing-config) is omitted. Every client implements at least the Pairing PSK method (see [Pairing](pairing.md#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](pairing.md#unpaired-access)
   - `enabled`: boolean
 
@@ -207,7 +207,9 @@ Only after receiving the initial `server/activate` should the client send any ot
 
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
-- `selected_pair_method?`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`. Required when `'pairing'` is in activities; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
+- `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
+  - `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
+  - `pin_length?`: integer - the dynamic [PIN length](pairing.md#dynamic-pin-pairing-flow) for this session. Required when `method` is `'dynamic_pin'`; absent otherwise.
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](connection.md#encryption):
 
@@ -219,7 +221,7 @@ The activity sets the server may legitimately declare are constrained by which P
 
 ¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](pairing.md#unpaired-access) enabled.
 
-`selected_pair_method` MUST be `'pairing_psk'` if and only if the matched PSK is the [Sendspin Pairing PSK](README.md#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
+`pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [Sendspin Pairing PSK](README.md#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
 Per-role trust also bounds `active_roles`: `source@v1` MUST NOT be activated at [trust level](README.md#definitions) `'none'` (see [Pairing required](roles/source/v1.md#source-messages)); no other role carries a trust constraint.
 
@@ -229,7 +231,7 @@ Per-role trust also bounds `active_roles`: `source@v1` MUST NOT be activated at 
 
 - If the matched PSK is the [Sentinel PSK](connection.md#pre-shared-key), the client does not have [unpaired access](pairing.md#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
 - If `activities` is not an allowed set for the matched PSK, `active_roles` is non-empty on a connection that is not playback-capable, or `active_roles` includes a role forbidden at the session's trust level (`source@v1` at `'none'`) - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
-- If `'pairing'` is in `activities` with a `selected_pair_method` the matched PSK disallows or the client does not currently offer - reply with [`pair/abort`](pairing.md#client--server-pairabort) reason `method_not_supported`, leaving the connection open. The check uses the live pairing configuration, which may have drifted from [`supported_pair_methods`](#client--server-clienthello); the server may re-activate, or [re-handshake](connection.md#re-handshake) for a fresh advertisement.
+- If `'pairing'` is in `activities` with a `pairing.method` the matched PSK disallows or the client does not currently offer - reply with [`pair/abort`](pairing.md#client--server-pairabort) reason `method_not_supported`, leaving the connection open. The check uses the live pairing configuration, which may have drifted from [`supported_pair_methods`](#client--server-clienthello); the server may re-activate, or [re-handshake](connection.md#re-handshake) for a fresh advertisement.
 
 **Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['playback', 'management']`, no unpaired-access setting makes that set allowed on the Sentinel PSK, so the reason is `'unauthorized'`.
 
