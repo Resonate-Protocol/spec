@@ -840,7 +840,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired; long-term Sendspin PSK when re-verifying a paired device)
+    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term Sendspin PSK when re-verifying a paired device)
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -918,7 +918,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired; long-term Sendspin PSK when re-verifying a paired device)
+    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term Sendspin PSK when re-verifying a paired device)
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
