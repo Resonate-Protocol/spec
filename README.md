@@ -886,6 +886,8 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pin-derive-v1"
 
 **PIN emission.** When emitting the PIN through a spoken channel, the client SHOULD use the best-matching language it supports, treating the activation's [`languages`](#server--client-serveractivate) as the language priority list under [RFC 4647](https://www.rfc-editor.org/rfc/rfc4647#section-3.4) Lookup matching, and falling back to its own default when nothing matches. The hint is informational and never grounds for [`pair/abort`](#client--server-pairabort); display emission is unaffected.
 
+**PIN presentation.** Grouping is presentation-only: the PIN value is the `L` contiguous digits, and separators never enter derivation, entry, or `PRS`. Displayed PINs SHOULD be grouped by length - `4`, `3-2`, `3-3`, `4-3`, `4-4`, `3-3-3`, `4-3-3`, `4-3-4`, `4-4-4` for `L` = 4 through 12: the most groups of 4 with none smaller than 3 (`3-2` for `L` = 5, which has no such split), smallest group in the middle. Servers SHOULD present matching grouped entry and SHOULD strip separator characters (spaces, hyphens) from typed input. Spoken emission SHOULD read single digits in the same groups, pausing between groups.
+
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pin_mismatch`.
 
 **Server verification.** When [`client/pair-confirm`](#client--server-clientpair-confirm) arrives, the server verifies, in this order:
@@ -911,7 +913,7 @@ Dynamic-PIN brute-force protection is built around a failure counter that escala
 
 Pairing with a fixed PIN. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. Every attempt is gesture-gated by a [pairing window](#pairing-window).
 
-**Lifecycle.** The static PIN is a fixed 8-digit value. A factory-provisioned PIN MUST be randomly generated per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`static_pin.pin`) from a paired server. Rotation invalidates a previously printed or distributed PIN but leaves established pairing records untouched.
+**Lifecycle.** The static PIN is a fixed 8-digit value, presented grouped `4-4` (see [PIN presentation](#dynamic-pin-pairing-flow)). A factory-provisioned PIN MUST be randomly generated per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`static_pin.pin`) from a paired server. Rotation invalidates a previously printed or distributed PIN but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
@@ -1003,7 +1005,7 @@ A condition during pairing that no conformant peer produces - a malformed or mis
 Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clienthello) is a descriptor object that names the pairing method and advertises the kind of operator interaction the client expects so the server can render appropriate UX.
 
 - `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - the pairing method identifier.
-- `out_channels?`: ('display' | 'speaker' | 'other')[] - informational hint for `dynamic_pin` only, listing the channels through which the per-session PIN is conveyed to the operator.
+- `out_channels?`: ('display' | 'speaker')[] - informational hint for `dynamic_pin` only, listing the channels through which the per-session PIN is conveyed to the operator.
 - `min_pin_length?`: integer - the shortest PIN length in digits the client will accept for this method. Required on `dynamic_pin` descriptors, absent on others. Range 4–12 (RECOMMENDED initial value at least 6). The server combines it with its own minimum to choose the [PIN length](#dynamic-pin-pairing-flow).
 - `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pin` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. When the secret is rotated, the client updates the hint accordingly.
 
