@@ -600,6 +600,8 @@ Server sends state updates to the client. Contains role-specific state objects.
 
 Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged. For the `metadata` and `color` objects, a future `timestamp` defers the merge (see scheduled updates for [`metadata`](#scheduled-metadata-updates) and [`color`](#scheduled-color-updates)).
 
+The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
+
 A role object set to `null` clears all of that role's state, taking effect immediately and discarding any pending scheduled update.
 
 - `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
@@ -1635,7 +1637,7 @@ Clients keep a **current state**, the running merge of applied updates and what 
 
 ##### Server rules for scheduled metadata
 
-The first `metadata` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
+The first `metadata` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. If that first message is itself scheduled, the same rule applies to it in turn. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
 
 #### Calculating current track position
 
@@ -1851,4 +1853,4 @@ Clients keep a **current state**, the running merge of applied updates and what 
 
 ##### Server rules for scheduled colors
 
-The first `color` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
+The first `color` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. If that first message is itself scheduled, the same rule applies to it in turn. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
