@@ -1631,22 +1631,15 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
 
 A `metadata` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's metadata timed to the audible track change).
 
-Clients keep a **confirmed state** (the running merge of updates) plus at most one **pending update**: the latest scheduled message, held whole. The client displays the confirmed state, with the pending update merged on top once it takes effect.
+Clients keep a **current state**, the running merge of applied updates and what they display, plus at most one **pending update**. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, used as-is), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update.
 
-**The clock only decides when a pending update takes effect:** the moment its `timestamp`, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately.
+##### Server rules for scheduled metadata
 
-**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving while a pending update with timestamp `T_pending` is held resolves the pending update first:
-
-- `T_new < T_pending`: discard the pending update as stale. If it had already taken effect, the display reverts to the confirmed state.
-- `T_new >= T_pending`: merge the pending update into the confirmed state, even if it has not yet taken effect.
-
-The arriving message then becomes the pending update if its `timestamp` is in the future, or merges into the confirmed state otherwise.
-
-To replace or cancel a pending update, first send a now-timestamped message (which may carry only the `timestamp` field).
+The first `metadata` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
 
 #### Calculating current track position
 
-Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the most recent metadata that included the `progress` object and has taken effect (see [Scheduled metadata updates](#scheduled-metadata-updates)):
+Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the most recent applied metadata that included the `progress` object (see [Scheduled metadata updates](#scheduled-metadata-updates)):
 
 ```python
 calculated_progress = metadata.progress.track_progress + (current_time - metadata.timestamp) * metadata.progress.playback_speed / 1000000
@@ -1729,20 +1722,13 @@ The message type determines which artwork channel this image is for:
 - Type `10`: Channel 2
 - Type `11`: Channel 3
 
-The timestamp indicates when this artwork should be displayed. Per channel, clients keep a **current image** plus at most one **pending image**: the latest scheduled one. The channel shows the current image, replaced by the pending image once it takes effect.
-
-**The clock only decides when a pending image takes effect:** the moment its timestamp, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately. Artwork is never dropped for lateness.
-
-**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving on a channel holding a pending image with timestamp `T_pending` resolves the pending image first:
-
-- `T_new < T_pending`: discard the pending image as stale. If it had already taken effect, the channel reverts to the current image.
-- `T_new >= T_pending`: the pending image becomes the current image, even if it has not yet taken effect.
-
-The arriving message then becomes the pending image if its timestamp is in the future, or the current image otherwise. On [`stream/end`](#server--client-streamend), clearing buffers includes discarding any pending image on every channel.
-
-To replace or cancel a pending image, first resend the current image with a present timestamp.
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**. A message whose timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, used as-is), is still in the future becomes the pending image, replacing any held one, and becomes current when that moment is reached. A message whose translated timestamp is in the past or present becomes current immediately and discards any held pending image; artwork is never dropped for lateness. On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel. An empty message follows the same rules as any other image: a future timestamp schedules the clear.
+
+#### Server rules for scheduled artwork
+
+To cancel a scheduled image, resend the one that should currently be showing; to amend it, resend it. A new future-timestamped image replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
@@ -1861,15 +1847,8 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
 
 A `color` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's colors timed to the audible track change).
 
-Clients keep a **confirmed state** (the running merge of updates) plus at most one **pending update**: the latest scheduled message, held whole. The client applies the confirmed state, with the pending update merged on top once it takes effect.
+Clients keep a **current state**, the running merge of applied updates and what they render from, plus at most one **pending update**. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, used as-is), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update.
 
-**The clock only decides when a pending update takes effect:** the moment its `timestamp`, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately.
+##### Server rules for scheduled colors
 
-**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving while a pending update with timestamp `T_pending` is held resolves the pending update first:
-
-- `T_new < T_pending`: discard the pending update as stale. If it had already taken effect, the client reverts to the confirmed state.
-- `T_new >= T_pending`: merge the pending update into the confirmed state, even if it has not yet taken effect.
-
-The arriving message then becomes the pending update if its `timestamp` is in the future, or merges into the confirmed state otherwise.
-
-To replace or cancel a pending update, first send a now-timestamped message (which may carry only the `timestamp` field).
+The first `color` message the server sends after a scheduled one, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. To cancel the scheduled change, send those fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
