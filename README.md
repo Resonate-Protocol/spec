@@ -1730,7 +1730,7 @@ The timestamp indicates when this artwork should be displayed. Per channel, clie
 
 #### Server rules for scheduled artwork
 
-To cancel a scheduled image, resend the one that should currently be showing; to amend it, resend it. A new future-timestamped image replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
+To cancel a scheduled image, resend the one that should currently be showing. A new future-timestamped image replaces the scheduled change rather than queueing behind it; to show two changes in sequence, send the second only after the first's timestamp has passed.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
