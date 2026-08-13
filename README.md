@@ -598,9 +598,9 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
+Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged. For the `metadata` and `color` objects, a future `timestamp` defers the merge (see scheduled updates for [`metadata`](#scheduled-metadata-updates) and [`color`](#scheduled-color-updates)).
 
-A role object set to `null` clears all of that role's state.
+A role object set to `null` clears all of that role's state, taking effect immediately and discarding any pending scheduled update.
 
 - `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
@@ -1614,7 +1614,7 @@ This section describes messages specific to clients with the `metadata` role, wh
 The `metadata` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `metadata`: object
-  - `timestamp`: integer - server clock time in microseconds for when this metadata is valid
+  - `timestamp`: integer - server clock time in microseconds at which this metadata takes effect. A past or present timestamp describes the currently playing audio and anchors [progress extrapolation](#calculating-current-track-position); a future timestamp schedules the update (see [Scheduled metadata updates](#scheduled-metadata-updates))
   - `title?`: string - track title
   - `artist?`: string - primary artist(s)
   - `album_artist?`: string - album artist(s)
@@ -1627,9 +1627,26 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
 
+#### Scheduled metadata updates
+
+A `metadata` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's metadata timed to the audible track change).
+
+Clients keep a **confirmed state** (the running merge of updates) plus at most one **pending update**: the latest scheduled message, held whole. The client displays the confirmed state, with the pending update merged on top once it takes effect.
+
+**The clock only decides when a pending update takes effect:** the moment its `timestamp`, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately.
+
+**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving while a pending update with timestamp `T_pending` is held resolves the pending update first:
+
+- `T_new < T_pending`: discard the pending update as stale. If it had already taken effect, the display reverts to the confirmed state.
+- `T_new >= T_pending`: merge the pending update into the confirmed state, even if it has not yet taken effect.
+
+The arriving message then becomes the pending update if its `timestamp` is in the future, or merges into the confirmed state otherwise.
+
+To replace or cancel a pending update, first send a now-timestamped message (which may carry only the `timestamp` field).
+
 #### Calculating current track position
 
-Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the current metadata state:
+Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the most recent metadata that included the `progress` object and has taken effect (see [Scheduled metadata updates](#scheduled-metadata-updates)):
 
 ```python
 calculated_progress = metadata.progress.track_progress + (current_time - metadata.timestamp) * metadata.progress.playback_speed / 1000000
@@ -1696,7 +1713,7 @@ The `channels` array covers every channel index the client declared in [`artwork
 
 Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source`, `format`, `width`, and `height` MUST match the declaration.
 
-**Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
+**Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change. If an image is also scheduled ahead for the channel, the server sends the current image first, then re-sends the scheduled one.
 
 ### Server → Client: Artwork (Binary)
 
@@ -1712,9 +1729,20 @@ The message type determines which artwork channel this image is for:
 - Type `10`: Channel 2
 - Type `11`: Channel 3
 
-The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. A timestamp already in the past on arrival means the image is displayed immediately, unless a newer image for the same channel has already superseded it (latest wins). Artwork is never dropped for lateness.
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep a **current image** plus at most one **pending image**: the latest scheduled one. The channel shows the current image, replaced by the pending image once it takes effect.
 
-**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel.
+**The clock only decides when a pending image takes effect:** the moment its timestamp, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately. Artwork is never dropped for lateness.
+
+**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving on a channel holding a pending image with timestamp `T_pending` resolves the pending image first:
+
+- `T_new < T_pending`: discard the pending image as stale. If it had already taken effect, the channel reverts to the current image.
+- `T_new >= T_pending`: the pending image becomes the current image, even if it has not yet taken effect.
+
+The arriving message then becomes the pending image if its timestamp is in the future, or the current image otherwise. On [`stream/end`](#server--client-streamend), clearing buffers includes discarding any pending image on every channel.
+
+To replace or cancel a pending image, first resend the current image with a present timestamp.
+
+**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel. An empty message follows the same rules as any other image: a future timestamp schedules the clear.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
@@ -1821,10 +1849,27 @@ This section describes messages specific to clients with the `color` role, which
 The `color` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `color`: object
-  - `timestamp`: integer - server clock time in microseconds for when these colors are valid
+  - `timestamp`: integer - server clock time in microseconds at which these colors take effect. A past or present timestamp describes the currently playing audio; a future timestamp schedules the update (see [Scheduled color updates](#scheduled-color-updates))
   - `background_dark?`: integer[] - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
   - `background_light?`: integer[] - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
   - `primary?`: integer[] - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
   - `accent?`: integer[] - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
   - `on_dark?`: integer[] - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
   - `on_light?`: integer[] - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
+
+#### Scheduled color updates
+
+A `color` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's colors timed to the audible track change).
+
+Clients keep a **confirmed state** (the running merge of updates) plus at most one **pending update**: the latest scheduled message, held whole. The client applies the confirmed state, with the pending update merged on top once it takes effect.
+
+**The clock only decides when a pending update takes effect:** the moment its `timestamp`, translated to the local clock via the [time filter](#clock-synchronization), is reached. The filter's current best estimate is used as-is: a timestamp in the past takes effect immediately.
+
+**Everything else is decided by comparing message timestamps**, never by the clock or arrival order. A message with timestamp `T_new` arriving while a pending update with timestamp `T_pending` is held resolves the pending update first:
+
+- `T_new < T_pending`: discard the pending update as stale. If it had already taken effect, the client reverts to the confirmed state.
+- `T_new >= T_pending`: merge the pending update into the confirmed state, even if it has not yet taken effect.
+
+The arriving message then becomes the pending update if its `timestamp` is in the future, or merges into the confirmed state otherwise.
+
+To replace or cancel a pending update, first send a now-timestamped message (which may carry only the `timestamp` field).

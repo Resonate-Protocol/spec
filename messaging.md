@@ -308,9 +308,9 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
+Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged. For the `metadata` and `color` objects, a future `timestamp` defers the merge (see scheduled updates for [`metadata`](roles/metadata/v1.md#scheduled-metadata-updates) and [`color`](roles/color/v1.md#scheduled-color-updates)).
 
-A role object set to `null` clears all of that role's state.
+A role object set to `null` clears all of that role's state, taking effect immediately and discarding any pending scheduled update.
 
 - `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](roles/metadata/v1.md#server--client-serverstate-metadata-object))
 - `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](roles/controller/v1.md#server--client-serverstate-controller-object))
