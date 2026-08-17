@@ -1633,7 +1633,7 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
 
 A `metadata` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's metadata timed to the audible track change).
 
-Clients keep a **current state** plus at most one **pending update**. The current state is the running merge of applied updates and is what the client displays. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update.
+Clients keep a **current state** plus at most one **pending update**. The current state is the running merge of applied updates and is what the client displays. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update. Clients MAY show the pending update early (e.g. a coming-up display for the next track).
 
 ##### Server rules for scheduled metadata
 
@@ -1724,7 +1724,7 @@ The message type determines which artwork channel this image is for:
 - Type `10`: Channel 2
 - Type `11`: Channel 3
 
-The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**. A message whose timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending image, replacing any held one, and becomes current when that moment is reached. A message whose translated timestamp is in the past or present becomes current immediately and discards any held pending image; artwork is never dropped for lateness. On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images.
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**. A message whose timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending image, replacing any held one, and becomes current when that moment is reached. A message whose translated timestamp is in the past or present becomes current immediately and discards any held pending image; artwork is never dropped for lateness. Clients MAY ease into the pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel. An empty message follows the same rules as any other image: a future timestamp schedules the clear.
 
@@ -1849,7 +1849,7 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
 
 A `color` object whose `timestamp` is in the future is a scheduled update: state that takes effect at that time (for example, the next track's colors timed to the audible track change).
 
-Clients keep a **current state** plus at most one **pending update**. The current state is the running merge of applied updates and is what the client renders from. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update.
+Clients keep a **current state** plus at most one **pending update**. The current state is the running merge of applied updates and is what the client renders from. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update. Clients MAY ease into the pending update around its timestamp (e.g. a color blend).
 
 ##### Server rules for scheduled colors
 
