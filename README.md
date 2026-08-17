@@ -1637,6 +1637,8 @@ Clients keep a **current state** plus at most one **pending update**. The curren
 
 ##### Server rules for scheduled metadata
 
+Servers SHOULD NOT schedule an update more than 20 seconds ahead.
+
 The first `metadata` message the server sends after a scheduled update, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. If that first message is itself scheduled, the same rule applies to it in turn. To cancel the scheduled update, send its fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled update rather than queueing behind it; to show two updates in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
 #### Calculating current track position
@@ -1729,6 +1731,8 @@ The timestamp indicates when this artwork should be displayed. Per channel, clie
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel. An empty message follows the same rules as any other image: a future timestamp schedules the clear.
 
 #### Server rules for scheduled artwork
+
+Servers SHOULD NOT schedule an image more than 20 seconds ahead.
 
 To cancel a scheduled image, resend the one that should currently be showing. A new future-timestamped image replaces the scheduled image rather than queueing behind it; to show two images in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
@@ -1852,5 +1856,7 @@ A `color` object whose `timestamp` is in the future is a scheduled update: state
 Clients keep a **current state** plus at most one **pending update**. The current state is the running merge of applied updates and is what the client renders from. A message whose `timestamp`, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending update, replacing any held one, and is applied to the current state when that moment is reached. A message whose translated timestamp is in the past or present is applied immediately and discards any held pending update. Clients MAY ease into the pending update around its timestamp (e.g. a color blend).
 
 ##### Server rules for scheduled colors
+
+Servers SHOULD NOT schedule an update more than 20 seconds ahead.
 
 The first `color` message the server sends after a scheduled update, whenever that is, MUST include all fields the scheduled message carried: whether the client applied or discarded the scheduled update depends on timing the server cannot observe, and a superset message leaves the client in the same state either way. If that first message is itself scheduled, the same rule applies to it in turn. To cancel the scheduled update, send its fields now-timestamped with current values; to amend it, resend it in full. A new future-timestamped message replaces the scheduled update rather than queueing behind it; to show two updates in sequence, send the second only after the first's timestamp has passed on the server's clock.
