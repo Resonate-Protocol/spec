@@ -62,19 +62,19 @@ On success, `data` is shaped as:
 
 - `pairing_psk`: object
   - `enabled`: boolean
-- `static_pin?`: object
+- `static_pairing_code?`: object
   - `enabled`: boolean
-- `dynamic_pin?`: object
+- `dynamic_pairing_code?`: object
   - `enabled`: boolean
-  - `min_pin_length`: integer - the shortest dynamic PIN length in digits the client will accept (4–12); see [PIN length](pairing.md#dynamic-pin-pairing-flow)
+  - `min_pairing_code_length`: integer - the shortest dynamic pairing code length in digits the client will accept (4–12); see [pairing code length](pairing.md#dynamic-pairing-code-flow)
   - `escalated`: boolean - `true` when the method is [escalated](pairing.md#failure-counter) to gesture-gating by its failure counter
 - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled`: boolean
 
-A PIN-method object is absent if the client does not implement that method.
+A pairing-code method object is absent if the client does not implement that method.
 
-Configured secrets (the Pairing PSK and the static PIN) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
+Configured secrets (the Pairing PSK and the static pairing code) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
 
 Possible outcomes: `ok`, `permission_denied`.
 
@@ -85,17 +85,17 @@ Modify pairing config.
 - `pairing_psk?`: object
   - `enabled?`: boolean
   - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured Pairing PSK
-- `static_pin?`: object
+- `static_pairing_code?`: object
   - `enabled?`: boolean
-  - `pin?`: string - 8 decimal digits; replaces the configured static PIN
-- `dynamic_pin?`: object
+  - `code?`: string - 8 decimal digits; replaces the configured static pairing code
+- `dynamic_pairing_code?`: object
   - `enabled?`: boolean
-  - `min_pin_length?`: integer - the shortest dynamic PIN length in digits the client will accept; must be in 4–12 range. See [PIN length](pairing.md#dynamic-pin-pairing-flow)
+  - `min_pairing_code_length?`: integer - the shortest dynamic pairing code length in digits the client will accept; must be in 4–12 range. See [pairing code length](pairing.md#dynamic-pairing-code-flow)
 - `record_mode?`: object - see [Record mode](#record-mode)
 - `unpaired_access?`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled?`: boolean
 
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. Enabling `static_pin` with no static PIN configured and none supplied in the same request is likewise rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
+The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. Enabling `static_pairing_code` with no static pairing code configured and none supplied in the same request is likewise rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](connection.md#pre-shared-key)) is rejected as `already_exists`.
 
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
@@ -118,7 +118,7 @@ Opens a [pairing window](pairing.md#pairing-window) in place of the operator ges
 
 No payload fields.
 
-A no-op `ok` when a window is already open; rejected as `invalid` when no PIN method is enabled.
+A no-op `ok` when a window is already open; rejected as `invalid` when no pairing-code method is enabled.
 
 Possible outcomes: `ok`, `permission_denied`, `invalid`.
 
