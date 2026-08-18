@@ -66,7 +66,6 @@ On success, `data` is shaped as:
   - `enabled`: boolean
 - `dynamic_pairing_code?`: object
   - `enabled`: boolean
-  - `min_pairing_code_length`: integer - the shortest dynamic pairing code length in digits the client will accept (4–12); see [pairing code length](pairing.md#dynamic-pairing-code-flow)
   - `escalated`: boolean - `true` when the method is [escalated](pairing.md#failure-counter) to gesture-gating by its failure counter
 - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](pairing.md#unpaired-access)
@@ -90,7 +89,6 @@ Modify pairing config.
   - `code?`: string - 8 decimal digits; replaces the configured static pairing code
 - `dynamic_pairing_code?`: object
   - `enabled?`: boolean
-  - `min_pairing_code_length?`: integer - the shortest dynamic pairing code length in digits the client will accept; must be in 4–12 range. See [pairing code length](pairing.md#dynamic-pairing-code-flow)
 - `record_mode?`: object - see [Record mode](#record-mode)
 - `unpaired_access?`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled?`: boolean
