@@ -105,7 +105,7 @@ sequenceDiagram
 - **Sendspin Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
 - **Sendspin PSK** - a 32-byte pre-shared symmetric secret shared between a (client, server) pair, established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Sendspin Pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK pairing method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server as a [pairing token](#pairing-token), copied as text or scanned as a QR code. Distinct from the per-pair Sendspin PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
-- **Sendspin Pairing Code** - a decimal-digit value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit value; the dynamic-pairing-code method uses a per-session generated value of variable length (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
+- **Sendspin Pairing Code** - a decimal-digit value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit value; the dynamic-pairing-code method uses a 6-digit value generated per pairing session (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
 - **Sendspin Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
 
 ## Role Versioning
@@ -490,7 +490,6 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
-  - `pairing_code_length?`: integer - the dynamic [pairing code length](#dynamic-pairing-code-flow) for this session. Required when `method` is `'dynamic_pairing_code'`; absent otherwise.
   - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/rfc/rfc5646) language tags in descending operator preference (e.g. `["ca", "es", "en"]`), for spoken [pairing code emission](#dynamic-pairing-code-flow). Optional when `method` is `'dynamic_pairing_code'`; absent otherwise.
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
@@ -833,7 +832,7 @@ SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO
 
 ### Dynamic Pairing Code Flow
 
-Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. An attempt is gesture-gated only when the method is [escalated](#failure-counter) or the chosen pairing code is short (see [Pairing Window](#pairing-window)).
+Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. An attempt is gesture-gated only when the method is [escalated](#failure-counter) (see [Pairing Window](#pairing-window)).
 
 ```mermaid
 sequenceDiagram
@@ -845,7 +844,7 @@ sequenceDiagram
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic pairing code
-    Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code, pairing_code_length})
+    Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code})
     opt gesture-gated attempt, no window open
         Client->>Server: client/pair-pending
         Note over Client: Operator opens pairing window
@@ -872,17 +871,15 @@ sequenceDiagram
 - `nonce_B` - 32 bytes drawn from a CSPRNG by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it (base64url-encoded, 43 chars).
 - `commit_B` - `SHA-256("sendspin-pair-commit-v1" || nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the pairing code derivation.
 
-**Pairing code length.** The digit count `L` is determined per pairing session as the larger of the two sides' minimums: `L = max(client_min, server_min)`, clamped to 4–12, where `client_min` is `min_pairing_code_length` from the client's [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) and `server_min` is the server's operator-configured minimum. The server computes it and sends it as `pairing_code_length` in the activation's [`pairing` object](#server--client-serveractivate). The client validates `pairing_code_length` on receipt of the activation, rejecting a value outside `[min_pairing_code_length, 12]` with [`pair/abort`](#client--server-pairabort) reason `pairing_code_length_unacceptable`.
-
-**Pairing code derivation.** Once the client has received `nonce_A` and `pairing_code_length`, both sides can derive the same pairing code from the Noise handshake hash `h`, the two nonces, and the chosen length `L`:
+**Pairing code derivation.** A dynamic pairing code is always 6 digits. Once the client has received `nonce_A`, both sides derive the same pairing code from the Noise handshake hash `h` and the two nonces:
 
 ```
 digest   = SHA-256("sendspin-pairing-code-derive-v1" || h || nonce_A || nonce_B)
-code_int = uint256_be(digest) mod 10^L
-code     = decimal(code_int) zero-padded to L digits
+code_int = uint256_be(digest) mod 10^6
+code     = decimal(code_int) zero-padded to 6 digits
 ```
 
-The hash input is the UTF-8 bytes of the literal label `"sendspin-pairing-code-derive-v1"` (no separator, no NUL terminator) followed by `h` (32 bytes, raw), `nonce_A` (32 bytes, raw), and `nonce_B` (32 bytes, raw). The full 32-byte SHA-256 output is interpreted as an unsigned big-endian 256-bit integer; the pairing code is its value modulo 10^L, zero-padded on the left to exactly `L` ASCII digits. The pairing code bytes fed into CPace as `PRS` are these `L` ASCII digits - the same per-digit encoding as the static pairing code.
+The hash input is the UTF-8 bytes of the literal label `"sendspin-pairing-code-derive-v1"` (no separator, no NUL terminator) followed by `h` (32 bytes, raw), `nonce_A` (32 bytes, raw), and `nonce_B` (32 bytes, raw). The full 32-byte SHA-256 output is interpreted as an unsigned big-endian 256-bit integer; the pairing code is its value modulo 10^6, zero-padded on the left to exactly 6 ASCII digits. The pairing code bytes fed into CPace as `PRS` are these 6 ASCII digits - the same per-digit encoding as the static pairing code.
 
 **Pairing code emission.** When emitting the pairing code through a spoken channel, the client SHOULD use the best-matching language it supports, treating the activation's [`languages`](#server--client-serveractivate) as the language priority list under [RFC 4647](https://www.rfc-editor.org/rfc/rfc4647#section-3.4) Lookup matching, and falling back to its own default when nothing matches. The hint is informational and never grounds for [`pair/abort`](#client--server-pairabort); display emission is unaffected.
 
@@ -953,7 +950,7 @@ Code-based pairing gates some attempts on a **pairing window**: a state in which
 An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - per the selected method's policy:
 
 - `static_pairing_code` - every attempt.
-- `dynamic_pairing_code` - only when the method is [escalated](#failure-counter), or when the session's [`pairing_code_length`](#dynamic-pairing-code-flow) is below **6**: short codes are bought with a gesture.
+- `dynamic_pairing_code` - only when the method is [escalated](#failure-counter).
 
 Pairing Window mechanics:
 
@@ -1004,7 +1001,6 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
 
 - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - the pairing method identifier.
 - `out_channels?`: ('display' | 'speaker' | 'other')[] - informational hint for `dynamic_pairing_code` only, listing the channels through which the per-session pairing code is conveyed to the operator.
-- `min_pairing_code_length?`: integer - the shortest pairing code length in digits the client will accept for this method. Required on `dynamic_pairing_code` descriptors, absent on others. Range 4–12 (RECOMMENDED initial value at least 6). The server combines it with its own minimum to choose the [pairing code length](#dynamic-pairing-code-flow).
 - `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. When the secret is rotated, the client updates the hint accordingly.
 
 ### Messages
@@ -1086,7 +1082,6 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
   - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer
-  - `pairing_code_length_unacceptable` (client) - the `pairing_code_length` in the activation's [`pairing` object](#server--client-serveractivate) is below the client's `min_pairing_code_length` or outside the 4–12 range
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed, or (in the Dynamic Pairing Code Flow) the pairing code binding check failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
 
@@ -1158,7 +1153,6 @@ On success, `data` is shaped as:
   - `enabled`: boolean
 - `dynamic_pairing_code?`: object
   - `enabled`: boolean
-  - `min_pairing_code_length`: integer - the shortest dynamic pairing code length in digits the client will accept (4–12); see [pairing code length](#dynamic-pairing-code-flow)
   - `escalated`: boolean - `true` when the method is [escalated](#failure-counter) to gesture-gating by its failure counter
 - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](#unpaired-access)
@@ -1182,7 +1176,6 @@ Modify pairing config.
   - `code?`: string - 8 decimal digits; replaces the configured static pairing code
 - `dynamic_pairing_code?`: object
   - `enabled?`: boolean
-  - `min_pairing_code_length?`: integer - the shortest dynamic pairing code length in digits the client will accept; must be in 4–12 range. See [pairing code length](#dynamic-pairing-code-flow)
 - `record_mode?`: object - see [Record mode](#record-mode)
 - `unpaired_access?`: object - see [Unpaired Access](#unpaired-access)
   - `enabled?`: boolean
