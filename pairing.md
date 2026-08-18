@@ -17,7 +17,7 @@ The client reveals the new PSK only after `server_kc` verifies, and only as `wra
 
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](connection.md#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
-Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code` - but SHOULD implement `static_pairing_code` too, shipped [disabled](management.md#server--client-managementset-pairing-config) with no pairing code provisioned. Clients whose display can render a QR code SHOULD offer also the `qr_code` [emission format](#dynamic-pairing-code-flow).
+Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code` - but SHOULD implement `static_pairing_code` too, shipped [disabled](management.md#server--client-managementset-pairing-config) with no pairing code provisioned. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
 ### Entering and leaving pairing
 
@@ -67,7 +67,7 @@ Two standing client obligations follow from this flow:
 1. The client MUST keep its Pairing PSK among its handshake PSK candidates whenever the method is [enabled](management.md#server--client-managementset-pairing-config), not only while a pairing activity is running: the server's re-handshake to the Pairing PSK succeeds only if the client already recognizes its `psk_id`.
 2. Before sending [`client/pair-finalize`](#client--server-clientpair-finalize), the client MUST verify that the connection's matched PSK is the Pairing PSK (the receiving side of the `pairing.method` invariant in [`server/activate`](messaging.md#server--client-serveractivate)); on mismatch it aborts with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
 
-**Pairing Token.** A server needs both the [Sendspin Pairing PSK](README.md#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together inside of a version-0 [pairing token](#pairing-token):
+**Pairing Token.** A server needs both the [Sendspin Pairing PSK](README.md#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together in a version-0 [pairing token](#pairing-token):
 
 ```
 payload = client_key (32 bytes) || pairing_psk (32 bytes)
