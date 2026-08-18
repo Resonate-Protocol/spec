@@ -208,9 +208,9 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
-  - `method`: 'dynamic_pin' | 'pairing_psk' | 'static_pin' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
-  - `pin_length?`: integer - the dynamic [PIN length](pairing.md#dynamic-pin-pairing-flow) for this session. Required when `method` is `'dynamic_pin'`; absent otherwise.
-  - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/rfc/rfc5646) language tags in descending operator preference (e.g. `["ca", "es", "en"]`), for spoken [PIN emission](pairing.md#dynamic-pin-pairing-flow). Optional when `method` is `'dynamic_pin'`; absent otherwise.
+  - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
+  - `pairing_code_length?`: integer - the dynamic [pairing code length](pairing.md#dynamic-pairing-code-flow) for this session. Required when `method` is `'dynamic_pairing_code'`; absent otherwise.
+  - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/rfc/rfc5646) language tags in descending operator preference (e.g. `["ca", "es", "en"]`), for spoken [pairing code emission](pairing.md#dynamic-pairing-code-flow). Optional when `method` is `'dynamic_pairing_code'`; absent otherwise.
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](connection.md#encryption):
 
