@@ -54,26 +54,21 @@ WebSocket binary messages are used to send JSON payloads, audio chunks, media ar
 
 ### Binary Message ID Structure
 
-Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
+The first byte of every binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
-**Role assignments:**
-- `00000000` (0): JSON message body (UTF-8)
-- `00000001` (1): Reserved for future use
-- `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
-- `000001xx` (4-7): Player role
-- `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Source role
-- `00010xxx` (16-23): Visualizer role
-- Roles 6-47 (IDs 24-191): Reserved for future roles
-- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](README.md#application-specific-roles)
+| IDs | Assignment |
+|---|---|
+| 0 | JSON message body (UTF-8) |
+| 1 | Reserved for future use |
+| 2-3 | [Fragmentation](#fragmentation) |
+| 4-7 | Player role |
+| 8-11 | Artwork role |
+| 12-15 | Source role |
+| 16-23 | Visualizer role |
+| 24-191 | Reserved for future roles |
+| 192-255 | Available for use by [application-specific roles](README.md#application-specific-roles) |
 
-**Message slots:**
-- Slot 0: `xxxxxx00`
-- Slot 1: `xxxxxx01`
-- Slot 2: `xxxxxx10`
-- Slot 3: `xxxxxx11`
-
-Roles with expanded allocations have slots 0-7.
+Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24-191 range.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 

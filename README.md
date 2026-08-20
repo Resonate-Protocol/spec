@@ -335,26 +335,21 @@ WebSocket binary messages are used to send JSON payloads, audio chunks, media ar
 
 ### Binary Message ID Structure
 
-Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
+The first byte of every binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
-**Role assignments:**
-- `00000000` (0): JSON message body (UTF-8)
-- `00000001` (1): Reserved for future use
-- `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
-- `000001xx` (4-7): Player role
-- `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Source role
-- `00010xxx` (16-23): Visualizer role
-- Roles 6-47 (IDs 24-191): Reserved for future roles
-- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](#application-specific-roles)
+| IDs | Assignment |
+|---|---|
+| 0 | JSON message body (UTF-8) |
+| 1 | Reserved for future use |
+| 2-3 | [Fragmentation](#fragmentation) |
+| 4-7 | Player role |
+| 8-11 | Artwork role |
+| 12-15 | Source role |
+| 16-23 | Visualizer role |
+| 24-191 | Reserved for future roles |
+| 192-255 | Available for use by [application-specific roles](#application-specific-roles) |
 
-**Message slots:**
-- Slot 0: `xxxxxx00`
-- Slot 1: `xxxxxx01`
-- Slot 2: `xxxxxx10`
-- Slot 3: `xxxxxx11`
-
-Roles with expanded allocations have slots 0-7.
+Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24-191 range.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
@@ -1715,10 +1710,10 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 - Rest of bytes: encoded image
 
 The message type determines which artwork channel this image is for:
-- Type `8`: Channel 0 (Artwork role, slot 0)
-- Type `9`: Channel 1 (Artwork role, slot 1)
-- Type `10`: Channel 2 (Artwork role, slot 2)
-- Type `11`: Channel 3 (Artwork role, slot 3)
+- Type `8`: Channel 0
+- Type `9`: Channel 1
+- Type `10`: Channel 2
+- Type `11`: Channel 3
 
 The timestamp indicates when this artwork should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization. A timestamp already in the past on arrival means the image is displayed immediately, unless a newer image for the same channel has already superseded it (latest wins). Artwork is never dropped for lateness.
 
