@@ -2,15 +2,15 @@
 
 This section covers the management commands a paired (`user`-trust) server may issue.
 
-Management commands are scoped to connections with `'management'` in their [`activities`](messaging.md#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [Sendspin PSK](README.md#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
+Management commands are scoped to connections with `'management'` in their [`activities`](messaging.md#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [long-term PSK](README.md#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
 
 All `management/*` requests are answered by a single [`management/result`](#client--server-managementresult) message. At most one management request may be in flight per connection; in-order WebSocket delivery makes the reply unambiguous.
 
 ### Records
 
-Read, create, and remove the pairing records stored by the client. Each record holds a [Sendspin PSK](README.md#definitions); every record carries `user` [trust level](README.md#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](README.md#definitions); every record carries `user` [trust level](README.md#definitions). Records come in two kinds:
 
-- **Stored-pubkey records** bind a per-server PSK to a specific `server_id`.
+- **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
 
 Across all record operations, a record is identified by its `psk_id` (see [Pre-Shared Key](connection.md#pre-shared-key) for the derivation).
@@ -31,10 +31,10 @@ Possible outcomes: `ok`, `permission_denied`.
 
 Add a pairing record directly.
 
-- `psk`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](README.md#definitions) (no padding)
+- `psk`: string - 43-character base64url-encoded 32-byte [long-term PSK](README.md#definitions) (no padding)
 - `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
 
-A `psk` whose `psk_id` is already known, whether as a record or as the Sentinel PSK or the client's Pairing PSK (see [Pre-Shared Key](connection.md#pre-shared-key)), is rejected as `already_exists`.
+A `psk` whose `psk_id` is already known, whether as a record or as the Sentinel PSK or the client's pairing PSK (see [Pre-Shared Key](connection.md#pre-shared-key)), is rejected as `already_exists`.
 
 Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
 
@@ -73,7 +73,7 @@ On success, `data` is shaped as:
 
 A pairing-code method object is absent if the client does not implement that method.
 
-Configured secrets (the Pairing PSK and the static pairing code) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
+Configured secrets (the pairing PSK and the static pairing code) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
 
 Possible outcomes: `ok`, `permission_denied`.
 
@@ -83,7 +83,7 @@ Modify pairing config.
 
 - `pairing_psk?`: object
   - `enabled?`: boolean
-  - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured Pairing PSK
+  - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured pairing PSK
 - `static_pairing_code?`: object
   - `enabled?`: boolean
   - `code?`: string - 8 decimal digits; replaces the configured static pairing code
@@ -104,7 +104,7 @@ When a server completes pairing via any method, the resulting record is created 
 `record_mode?`: object
 - `psk_id`: string - the shared-PSK record used as the storage-exhaustion fallback.
 
-The client creates a stored-pubkey record bound to the server, holding a freshly generated per-server [Sendspin PSK](README.md#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
+The client creates a stored-pubkey record bound to the server, holding a freshly generated [long-term PSK](README.md#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
 
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
 

@@ -216,13 +216,13 @@ The activity sets the server may legitimately declare are constrained by which P
 
 | PSK matched | Allowed activity sets |
 |---|---|
-| [Sendspin PSK](README.md#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` |
-| [Sendspin Pairing PSK](README.md#definitions) | `['pairing']` |
+| [long-term PSK](README.md#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` |
+| [pairing PSK](README.md#definitions) | `['pairing']` |
 | [Sentinel PSK](connection.md#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
 
 ¹ `['playback']` on the Sentinel PSK is only allowed when the client has [unpaired access](pairing.md#unpaired-access) enabled.
 
-`pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [Sendspin Pairing PSK](README.md#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
+`pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](README.md#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
 Per-role trust also bounds `active_roles`: `source@v1` MUST NOT be activated at [trust level](README.md#definitions) `'none'` (see [Pairing required](roles/source/v1.md#source-messages)); no other role carries a trust constraint.
 
