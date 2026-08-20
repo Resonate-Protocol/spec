@@ -16,7 +16,7 @@ Clients announce their presence via mDNS using:
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
-**Note:** The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
 **Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
@@ -51,7 +51,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
-**Note:** The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
 **Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
