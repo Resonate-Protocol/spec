@@ -2,7 +2,7 @@
 
 Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
-Sendspin Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
+Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
 The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
