@@ -7,8 +7,8 @@ This specification defines three pairing methods. Servers must implement all thr
 ### Methods
 
 1. **Pairing PSK** - pairing authenticated by a [Sendspin Pairing PSK](README.md#definitions); no PAKE round, no pairing code. See [Pairing PSK Flow](#pairing-psk-flow).
-2. **Dynamic Pairing Code** - pairing with a per-session [Sendspin Pairing Code](README.md#definitions) that the client derives from a commit-and-reveal binding to the Noise handshake and emits via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow).
-3. **Static Pairing Code** - pairing with a fixed [Sendspin Pairing Code](README.md#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the pairing code is disclosed. See [Static Pairing Code Flow](#static-pairing-code-flow).
+2. **Dynamic Pairing Code** - pairing with a per-session [Pairing Code](README.md#definitions) that the client derives from a commit-and-reveal binding to the Noise handshake and emits via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow).
+3. **Static Pairing Code** - pairing with a fixed [Pairing Code](README.md#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the pairing code is disclosed. See [Static Pairing Code Flow](#static-pairing-code-flow).
 
 - **Unpaired.** Sentinel PSK; the channel is unauthenticated until the CPace round completes. The round establishes trust from scratch and produces a new [long-term PSK](README.md#definitions).
 - **Already paired.** The server moves the established connection into pairing (see [Entering and leaving pairing](#entering-and-leaving-pairing)) and runs the round over the existing long-term Sendspin PSK.

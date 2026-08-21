@@ -2,7 +2,7 @@
 
 Sendspin has two standard ways to establish connections: Server and Client initiated. Server Initiated connections are recommended as they provide standardized multi-server behavior, but require mDNS which may not be available in all environments.
 
-Sendspin Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
+Servers must support both methods described below. Clients MUST use exactly one of the two methods at a time, advertising or discovering accordingly.
 
 The WebSocket transport MUST be plain `ws://`. Confidentiality and integrity are provided end to end by the [Noise layer](#encryption) inside the WebSocket payloads.
 
@@ -16,7 +16,7 @@ Clients announce their presence via mDNS using:
 
 The server discovers available clients through mDNS and connects to each client via WebSocket using the advertised address and path.
 
-**Note:** The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](messaging.md#client--server-clienthello). It is only a discovery-time hint; if the two differ, the `client/hello` value is authoritative.
 
 **Note:** Do not manually connect to servers if you are advertising `_sendspin._tcp`.
 
@@ -51,7 +51,7 @@ If clients prefer to initiate the connection instead of waiting for the server t
 
 Clients discover the server through mDNS and initiate a WebSocket connection using the advertised address and path.
 
-**Note:** The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
+The TXT `name` SHOULD match the `name` the server sends in [`server/hello`](messaging.md#server--client-serverhello). It is only a discovery-time hint; if the two differ, the `server/hello` value is authoritative.
 
 **Note:** Do not advertise `_sendspin._tcp` if the client plans to initiate the connection.
 
