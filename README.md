@@ -302,7 +302,7 @@ WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages
 
 All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
 
-**Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel, regardless of which side sends them. `group/`, `management/`, `pair/`, and `noise/` name a subject. A message outside the `client/` and `server/` groups can flow in either direction; each message's definition gives its direction.
+**Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel from the server to the client, and `client-stream/` those that control a binary channel from the client to the server; the two kinds of channel are independent and have separate lifetimes. `group/`, `management/`, `pair/`, and `noise/` name a subject. A message outside the `client/` and `server/` groups can flow in either direction; each message's definition gives its direction.
 
 **Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](#application-specific-roles) objects a message explicitly permits.
 
@@ -1457,7 +1457,7 @@ The `source@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 **Note:** Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
-**Note:** A source announces its input format in [`stream/client-start`](#client--server-streamclient-start); there is no pre-negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept whatever format a source announces.
+**Note:** A source announces its input format in [`client-stream/start`](#client--server-client-streamstart); there is no pre-negotiation. Since the server centrally resamples and transcodes source audio, it SHOULD accept whatever format a source announces.
 
 ### Client → Server: `client/state` source object
 
@@ -1476,26 +1476,26 @@ The `source` object in [`server/command`](#server--client-servercommand) has thi
 #### Source command semantics
 
 - `command` controls whether this source streams to the server:
-  - `start`: server requests the source to begin streaming. The client SHOULD promptly send `stream/client-start` and then send source audio chunks.
-  - `stop`: server requests the source to stop streaming. The client SHOULD send `stream/client-end` and stop sending source audio chunks.
+  - `start`: server requests the source to begin streaming. The client SHOULD promptly send `client-stream/start` and then send source audio chunks.
+  - `stop`: server requests the source to stop streaming. The client SHOULD send `client-stream/end` and stop sending source audio chunks.
 
 Both commands are idempotent: a `start` received while the input stream is open MUST NOT restart the stream, and a `stop` received while already stopped is ignored.
 
 #### Default streaming behavior
 
-The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming. An unsolicited `stream/client-start` (received when the server has not issued `start`) is a protocol error: the server MUST NOT treat the input stream as open and should close the connection, consistent with the binary-chunk rejection rule below.
+The default after the handshake is `stop`: a source MUST NOT stream until the server sends `command: "start"`. The server is the only party that initiates streaming. An unsolicited `client-stream/start` (received when the server has not issued `start`) is a protocol error: the server MUST NOT treat the input stream as open and should close the connection, consistent with the binary-chunk rejection rule below.
 
 Streaming state is per-connection: a previously sent `start` does not survive reconnection, and a server that still wants the stream MUST send `command: "start"` again.
 
 A source that supports line sensing reports `signal` in [`client/state`](#client--server-clientstate). The server MAY use it as a hint for when to send `command: "start"` or `command: "stop"`, but the decision is server policy.
 
-When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `stream/client-end` and stops sending chunks.
+When the server removes `source` from [`active_roles`](#server--client-serveractivate), the client sends `client-stream/end` and stops sending chunks.
 
-A source with an open input stream that becomes [`available: false`](#external-source-handling) sends `stream/client-end` before it reports `available: false` in `client/state`; the server treats the transition as an implicit `stop`.
+A source with an open input stream that becomes [`available: false`](#external-source-handling) sends `client-stream/end` before it reports `available: false` in `client/state`; the server treats the transition as an implicit `stop`.
 
-### Client → Server: `stream/client-start`
+### Client → Server: `client-stream/start`
 
-The `stream/client-start` message announces the active input stream format and provides any required codec header data.
+The `client-stream/start` message announces the active input stream format and provides any required codec header data.
 
 - `source`: object
   - `codec`: 'opus' | 'flac' | 'pcm'
@@ -1504,7 +1504,7 @@ The `stream/client-start` message announces the active input stream format and p
   - `bit_depth`: integer - ignored for `opus`
   - `codec_header?`: string - codec header encoded as standard Base64, if necessary (e.g., FLAC)
 
-A `stream/client-start` received while an input stream is already open replaces the stream format in place.
+A `client-stream/start` received while an input stream is already open replaces the stream format in place.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1512,18 +1512,18 @@ A `stream/client-start` received while an input stream is already open replaces 
 
 - `pcm`: any whole number of PCM frames (one frame = one sample across all channels), interleaved by channel, encoded per the convention above. `codec_header` is absent.
 - `flac`: one or more complete FLAC frames. `codec_header` is required and carries the `fLaC` stream marker followed by the STREAMINFO metadata block.
-- `opus`: exactly one Opus packet ([RFC 6716](https://www.rfc-editor.org/rfc/rfc6716)) per chunk, with no container. `codec_header` is absent; the decoder is configured from the negotiated `sample_rate` and `channels` in `stream/client-start`.
+- `opus`: exactly one Opus packet ([RFC 6716](https://www.rfc-editor.org/rfc/rfc6716)) per chunk, with no container. `codec_header` is absent; the decoder is configured from the negotiated `sample_rate` and `channels` in `client-stream/start`.
 
 `codec_header` uses standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included).
 
-### Client → Server: `stream/client-end`
+### Client → Server: `client-stream/end`
 
-The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `stream/client-start`.
+The client ends the current input stream. After this message, no more source audio chunks SHOULD be sent until a new `client-stream/start`.
 
 ### Client → Server: Source Audio Chunks (Binary)
 
-Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `stream/client-start` or after a `stream/client-end`) or the client is not [`available`](#client--server-clientstate).
-Clients MUST send `stream/client-start` before the first audio chunk. After the server sends `command: "stop"`, chunks may keep arriving until the client processes the command and sends `stream/client-end`; servers MUST tolerate these and MAY discard them.
+Binary messages SHOULD be rejected by the server if there is no open input stream (i.e., received before a `client-stream/start` or after a `client-stream/end`) or the client is not [`available`](#client--server-clientstate).
+Clients MUST send `client-stream/start` before the first audio chunk. After the server sends `command: "stop"`, chunks may keep arriving until the client processes the command and sends `client-stream/end`; servers MUST tolerate these and MAY discard them.
 
 - Byte 0: message type `12` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample was captured
@@ -1531,7 +1531,7 @@ Clients MUST send `stream/client-start` before the first audio chunk. After the 
 
 The timestamp indicates when the first audio sample in this chunk was captured (in server time domain). It is the best-effort time the audio reached the input (ADC). For codecs with encoder delay, it refers to the capture time of the first sample the decoder will emit for the chunk. The server MAY resample/transcode and then distribute the audio to players with its normal buffering and synchronization strategy.
 
-A source MUST NOT send a chunk longer than 150 ms, and SHOULD NOT send one shorter than 5 ms (the final chunk before a `stream/client-end` MAY be shorter). After a network stall, clients SHOULD drop buffered backlog beyond a small bound and resume from live capture rather than burst stale audio.
+A source MUST NOT send a chunk longer than 150 ms, and SHOULD NOT send one shorter than 5 ms (the final chunk before a `client-stream/end` MAY be shorter). After a network stall, clients SHOULD drop buffered backlog beyond a small bound and resume from live capture rather than burst stale audio.
 
 **Note:** Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous. Servers SHOULD estimate the source's effective sample rate from the delivered sample stream and use timestamps to anchor the stream in time and to detect gaps and discontinuities, not as per-chunk cut points. Servers SHOULD absorb rate deviations by resampling, keeping the correction inaudible.
 
