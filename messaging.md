@@ -54,26 +54,21 @@ WebSocket binary messages are used to send JSON payloads, audio chunks, media ar
 
 ### Binary Message ID Structure
 
-Binary message IDs typically use **bits 7-2** for role type and **bits 1-0** for message slot, allocating 4 IDs per role. Roles with expanded allocations use **bits 2-0** for message slot (8 IDs).
+The first byte of every binary message is its message ID. IDs are assigned from the table below; each role's binary message definitions name the exact IDs it uses.
 
-**Role assignments:**
-- `00000000` (0): JSON message body (UTF-8)
-- `00000001` (1): Reserved for future use
-- `0000001x` (2-3): Used for [Fragmentation](#fragmentation)
-- `000001xx` (4-7): Player role
-- `000010xx` (8-11): Artwork role
-- `000011xx` (12-15): Source role
-- `00010xxx` (16-23): Visualizer role
-- Roles 6-47 (IDs 24-191): Reserved for future roles
-- Roles 48-63 (IDs 192-255): Available for use by [application-specific roles](README.md#application-specific-roles)
+| IDs | Assignment |
+|---|---|
+| 0 | JSON message body (UTF-8) |
+| 1 | Reserved for future use |
+| 2-3 | [Fragmentation](#fragmentation) |
+| 4-7 | Player role |
+| 8-11 | Artwork role |
+| 12-15 | Source role |
+| 16-23 | Visualizer role |
+| 24-191 | Reserved for future roles |
+| 192-255 | Available for use by [application-specific roles](README.md#application-specific-roles) |
 
-**Message slots:**
-- Slot 0: `xxxxxx00`
-- Slot 1: `xxxxxx01`
-- Slot 2: `xxxxxx10`
-- Slot 3: `xxxxxx11`
-
-Roles with expanded allocations have slots 0-7.
+Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24-191 range.
 
 **Note:** Role versions share the same binary message IDs (e.g., `player@v1` and `player@v2` both use IDs 4-7).
 
@@ -119,7 +114,7 @@ A player MUST NOT report `available: true` until its time filter has converged e
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
 
-Every Sendspin client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
+Every client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
 [Management](management.md#management) messages are likewise required for all clients and servers. [Pairing](pairing.md#pairing) messages are required for all servers; clients implement the subset matching their advertised pairing methods.
 
@@ -128,7 +123,7 @@ Every Sendspin client and server must implement all messages in this section reg
 First message sent by the client after the WebSocket connection is established. Contains information necessary for conducting the Noise handshake.
 
 - `client_id`: string - client's static public key (43-character base64url-encoded Curve25519, no padding). See [Identities](connection.md#identities). Persistent across reconnections so servers can associate clients with previous sessions (e.g., remembering group membership, settings, playback queue)
-- `version`: integer (must be `1`) - version of the core message format that the Sendspin client implements (independent of role versions)
+- `version`: integer (must be `1`) - version of the core message format that the client implements (independent of role versions)
 - `suite`: '25519_ChaChaPoly_SHA256' | '25519_AESGCM_SHA256' - Noise cipher suite the client picked for this connection. See [Cipher Suites](connection.md#cipher-suites)
 
 **Note:** `version` (here and in [`server/init`](#server--client-serverinit)) is an exact-match field naming the single core message format the sender speaks, not a minimum-supported version. Under this specification both sides send `1` and abort the handshake on any other value (see [Failure Handling](connection.md#failure-handling)); a future revision that changes the core format will bump the value and define its own negotiation semantics.
@@ -182,7 +177,7 @@ Players that can output audio should have the role `player`.
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
   - `source@v1` - captures audio from a local input and streams it to the server
-  - `controller@v1` - controls the current Sendspin group
+  - `controller@v1` - controls the current group
   - `metadata@v1` - displays text metadata describing the currently playing audio
   - `artwork@v1` - displays artwork images
   - `visualizer@v1` - visualizes audio
@@ -236,9 +231,9 @@ Per-role trust also bounds `active_roles`: `source@v1` MUST NOT be activated at 
 
 **Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['playback', 'management']`, no unpaired-access setting makes that set allowed on the Sentinel PSK, so the reason is `'unauthorized'`.
 
-**Note:** Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
+Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](connection.md#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 
-**Note:** Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
+Servers normally activate the client's [preferred](README.md#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
 **Note:** When a `server/activate` removes a role from `active_roles`, the server first ends that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
 
@@ -325,7 +320,7 @@ The merge is shallow: a nested object (e.g., `metadata.progress`) is replaced or
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry the role's full state.
 
-**Note:** The asymmetry with [`client/state`](#client--server-clientstate) is deliberate: server-to-client updates carry only changed fields; clients MAY resend unchanged fields.
+The asymmetry with [`client/state`](#client--server-clientstate) is deliberate: server-to-client updates carry only changed fields; clients MAY resend unchanged fields.
 
 - `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](roles/metadata/v1.md#server--client-serverstate-metadata-object))
 - `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](roles/controller/v1.md#server--client-serverstate-controller-object))
@@ -424,8 +419,8 @@ Sent by the client before gracefully closing the connection. This allows the cli
 Upon receiving this message, the server should initiate the disconnect.
 
 - `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
-  - `another_server` - client is switching to a different Sendspin server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
-  - `shutdown` - client is shutting down. Server should not auto-reconnect
+  - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
+  - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
   - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` without `'user'` [trust level](README.md#definitions)), or the client removed its own pairing record (see [`management/remove-record`](management.md#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
@@ -433,11 +428,10 @@ Upon receiving this message, the server should initiate the disconnect.
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
-**Note:** When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send `shutdown`.
 
 **Note:** On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
-**Note:** Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
+Clients may close the connection without sending this message (e.g., crash, network loss), or immediately after sending `client/goodbye` without waiting for the server to disconnect. When a client disconnects without sending `client/goodbye`:
 
 - On a connection whose `activities` are empty, or include `'playback'`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
 - Otherwise, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
