@@ -1657,7 +1657,7 @@ The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello)
 - `artwork@v1_support`: object
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
+    - `format`: 'jpeg' | 'png' - image format identifier
     - `media_width`: integer - width in pixels of the delivered image
     - `media_height`: integer - height in pixels of the delivered image
 
@@ -1667,7 +1667,7 @@ The server MUST deliver each image at exactly the `media_width` by `media_height
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
-Servers MUST support all image formats: 'jpeg', 'png', and 'bmp'.
+Servers MUST support 'jpeg' and 'png'.
 
 ### Client → Server: `stream/request-format` artwork object
 
@@ -1680,7 +1680,7 @@ Response when an `artwork` stream is active: [`stream/start`](#server--client-st
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
   - `source?`: 'album' | 'artist' | 'none' - artwork source type
-  - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
+  - `format?`: 'jpeg' | 'png' - requested image format identifier
   - `media_width?`: integer - requested width in pixels
   - `media_height?`: integer - requested height in pixels
 
@@ -1691,7 +1691,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 - `artwork`: object
   - `channels`: object[] - configuration for each artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
+    - `format`: 'jpeg' | 'png' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
 
