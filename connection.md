@@ -100,7 +100,7 @@ To let the client select the right PSK before the PSK must be mixed in, the serv
 psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 ```
 
-The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, Pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
 The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would make a single wire `psk_id` map to two trust levels. Clients enforce this when records are configured (see [Management](management.md#records)).
 
