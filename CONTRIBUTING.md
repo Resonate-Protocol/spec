@@ -30,7 +30,7 @@ The source files follow these rules. Check a change against them before proposin
 - **A client describes itself across `client/hello` and `client/state`.** A field expected to change during a connection belongs in `client/state`; a field expected to stay constant for the connection, such as device identity or a fixed hardware limit, belongs in `client/hello`. `client/hello` is sent once per connection, so a field placed there can only be updated by reconnecting.
 - **Edit the source files, never `README.md`.** `README.md` is generated; the pre-commit hook regenerates it and blocks direct edits.
 - **Every heading needs a unique anchor.** The build fails on two headings that produce the same anchor, and on a link to an anchor with no matching heading.
-- **Use one canonical name per term.** Where the Definitions section defines a term, body text uses exactly that name - not a synonym or a prefixed variant. Prose names agree with the wire identifiers they describe.
+- **Use one canonical name per term.** Where the Definitions section defines a term, body text uses exactly that name - not a synonym or a prefixed variant, unless the prefix disambiguates (`Sendspin client`, where the WebSocket client is a different thing). Prose names agree with the wire identifiers they describe.
 - **`**Note:**` blocks are non-normative.** Requirements - uppercase BCP 14 keywords (MUST, SHOULD, MAY, ...) - belong in body text. A note must read as a comment the reader can skip.
 
 ## Pre-commit hook
