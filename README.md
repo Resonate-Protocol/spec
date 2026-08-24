@@ -1076,7 +1076,7 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it starts the pairing [attempt](#entering-and-leaving-pairing) and is sent immediately after the [`server/activate`](#server--client-serveractivate), carrying the PSK directly. Exactly one of the two fields is present.
+Delivers the long-term PSK established by this pairing. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it starts the pairing [attempt](#entering-and-leaving-pairing) and is sent immediately after the [`server/activate`](#server--client-serveractivate), carrying the PSK directly. Exactly one of the two fields is present.
 
 - `long_term_psk?`: string - 43-character base64url-encoded 32-byte [long-term PSK](#definitions) (no padding). [Pairing PSK Flow](#pairing-psk-flow) only
 - `wrapped_psk?`: string - 64-character base64url-encoded 48-byte [wrapping](#wrapping) of the new [long-term PSK](#definitions) (no padding). Code-based flows only
