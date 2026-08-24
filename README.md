@@ -394,6 +394,14 @@ Each [`server/time`](#server--client-servertime) response provides the four time
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
 
+### Transmit timestamps
+
+Two things report when the server transmitted a message: the `server_transmitted` field, and the `send_ahead` interval carried in binary audio chunks. The server takes this time as late as its implementation permits, at the point the encoded bytes are handed to the transport for writing, after any application-level queueing or per-client scheduling. A server MUST NOT stamp a message at the time it is enqueued for later transmission.
+
+Delay accruing after that point - transport send buffering, an earlier fragmented message still in flight, link contention - is not represented in the value and is observed by the client as network delay.
+
+A client measuring transit takes its `arrival` time for the message once the message is available to the application: after AEAD decryption, and after reassembly for a fragmented message. Both ends of the measurement therefore sit at the application boundary.
+
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
 
@@ -668,7 +676,6 @@ Ends the stream for one or more roles. When received, clients should stop output
 
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
-- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
@@ -1309,7 +1316,7 @@ State updates must be sent whenever any state changes, including when the volume
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000), REQUIRED for players
   - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
-  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players.
+  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players. See [Measuring timing parameters](#client--server-clientstate-player-object).
   - `supported_commands?`: string[] - subset of: 'set_output_delay'
 
 **Delta updates:** The presence requirements above (REQUIRED fields, and fields that MUST be included when a command is supported) describe a player's full state, reported in the initial message. In any later update a player MAY omit fields whose values have not changed, per the delta rules in [`client/state`](#client--server-clientstate).
@@ -1319,6 +1326,8 @@ State updates must be sent whenever any state changes, including when the volume
 **Volume and mute:** Persisting `volume` and `muted` across reboots is RECOMMENDED for players. A server MUST NOT assume these values are unchanged after a reconnect.
 
 **Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
+
+**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. For a chunk carrying [`send_ahead`](#server--client-audio-chunks-binary), that delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the time filter's server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
 ### Client → Server: `stream/request-format` player object
 
@@ -1371,9 +1380,14 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 
 - Byte 0: message type `4` (uint8)
 - Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the first sample should be output
+- Bytes 9-12: send_ahead (big-endian uint32) - microseconds from the server's transmission of this message to `timestamp`
 - Rest of bytes: encoded audio frame
 
 The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
+
+`send_ahead` reports the lead the server had in hand when it sent the chunk: its transmit time is `timestamp - send_ahead` in the server's clock, taken as described in [Transmit timestamps](#transmit-timestamps). The field saturates rather than wrapping: a server MUST send `0` when it transmits at or after `timestamp`, and `4294967295` when the true lead exceeds what the field can represent (about 71 minutes). Both saturation values report that no lead was measured, not a lead of that length, so a player MUST NOT use a chunk carrying either as a delay sample.
+
+`send_ahead` carries no scheduling meaning and MUST NOT affect when the chunk is played; players use it only to measure arrival delay (see [Measuring timing parameters](#client--server-clientstate-player-object)).
 
 ## Playback Synchronization
 

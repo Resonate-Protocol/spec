@@ -113,6 +113,14 @@ Each [`server/time`](#server--client-servertime) response provides the four time
 
 A player MUST NOT report `available: true` until its time filter has converged enough to begin scheduling playback. A source MUST NOT report `available: true` until its time filter has converged enough to timestamp captured audio.
 
+### Transmit timestamps
+
+Two things report when the server transmitted a message: the `server_transmitted` field, and the `send_ahead` interval carried in binary audio chunks. The server takes this time as late as its implementation permits, at the point the encoded bytes are handed to the transport for writing, after any application-level queueing or per-client scheduling. A server MUST NOT stamp a message at the time it is enqueued for later transmission.
+
+Delay accruing after that point - transport send buffering, an earlier fragmented message still in flight, link contention - is not represented in the value and is observed by the client as network delay.
+
+A client measuring transit takes its `arrival` time for the message once the message is available to the application: after AEAD decryption, and after reassembly for a fragmented message. Both ends of the measurement therefore sit at the application boundary.
+
 ## Core messages
 This section describes the fundamental messages that establish communication between clients and the server. These messages handle initial handshakes, ongoing clock synchronization, stream lifecycle management, and role-based state updates and commands.
 
@@ -387,7 +395,6 @@ Ends the stream for one or more roles. When received, clients should stop output
 
 Sending `stream/end` in these cases is explicitly prohibited because it signals actual playback termination, causing clients to stop output entirely rather than continue playing.
 
-- `server_transmitted`: integer - timestamp that the server transmitted this message in microseconds
 - `roles?`: string[] - roles to end streams for ('player', 'artwork', 'visualizer'). If omitted, ends all active streams
 
 [Application-specific roles](README.md#application-specific-roles) may also be included in this array (names starting with `_`).
