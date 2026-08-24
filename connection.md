@@ -100,7 +100,7 @@ To let the client select the right PSK before the PSK must be mixed in, the serv
 psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 ```
 
-The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, Pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
 The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would make a single wire `psk_id` map to two trust levels. Clients enforce this when records are configured (see [Management](management.md#records)).
 
@@ -120,7 +120,7 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
 
 The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the handshake fails. A PSK for a pairing method disabled in the client's [pairing config](management.md#server--client-managementset-pairing-config) is excluded from the candidate set, so a handshake referencing it fails as a lookup miss.
 
-Two storage variants are supported for long-term [Sendspin PSK](README.md#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
+Two storage variants are supported for [long-term PSK](README.md#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
 
 - **Stored-pubkey model**: each long-term PSK is persisted alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](messaging.md#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
 - **Shared-PSK model**: PSKs are persisted without an associated `server_id`; the `server_id` from [`server/init`](messaging.md#server--client-serverinit) is accepted at face value. Convenient for storage-constrained clients, but with weaker security properties - multiple servers may share the same PSK.
@@ -137,6 +137,6 @@ Any handshake-phase failure - malformed cleartext message, unsupported `version`
 
 ### Re-handshake
 
-The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust level after a successful [pairing](pairing.md#pairing), to switch from Sentinel to a Pairing PSK, or to rotate session keys on long-running connections.
+The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust level after a successful [pairing](pairing.md#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
 The server initiates, as in the original handshake. The two [`noise/handshake`](messaging.md#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](messaging.md#server--client-serverhello) → [`client/hello`](messaging.md#client--server-clienthello) (the client re-asserts `trust_level`) → [`server/activate`](messaging.md#server--client-serveractivate).

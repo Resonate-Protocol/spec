@@ -6,14 +6,14 @@ This specification defines three pairing methods. Servers must implement all thr
 
 ### Methods
 
-1. **Pairing PSK** - pairing authenticated by a [Sendspin Pairing PSK](README.md#definitions); no PAKE round, no pairing code. See [Pairing PSK Flow](#pairing-psk-flow).
+1. **Pairing PSK** - pairing authenticated by a [pairing PSK](README.md#definitions); no PAKE round, no pairing code. See [Pairing PSK Flow](#pairing-psk-flow).
 2. **Dynamic Pairing Code** - pairing with a per-session [Pairing Code](README.md#definitions) that the client derives from a commit-and-reveal binding to the Noise handshake and emits via an out-channel (display, speaker, etc.) for the operator to enter into the server. See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow).
 3. **Static Pairing Code** - pairing with a fixed [Pairing Code](README.md#definitions). Appropriate for devices with no out-channel; vulnerable to MITM if the pairing code is disclosed. See [Static Pairing Code Flow](#static-pairing-code-flow).
 
 - **Unpaired.** Sentinel PSK; the channel is unauthenticated until the CPace round completes. The round establishes trust from scratch and produces a new [long-term PSK](README.md#definitions).
-- **Already paired.** The server moves the established connection into pairing (see [Entering and leaving pairing](#entering-and-leaving-pairing)) and runs the round over the existing long-term Sendspin PSK.
+- **Already paired.** The server moves the established connection into pairing (see [Entering and leaving pairing](#entering-and-leaving-pairing)) and runs the round over the existing long-term PSK.
 
-The client reveals the new PSK only after `server_kc` verifies, and only as `wrapped_psk` [sealed under the CPace output](#wrapping): a peer that cannot complete the PAKE - wrong pairing code, or a man in the middle relaying between two handshakes, whose differing `h` gives each leg a different `sid` - neither triggers the reveal nor can unwrap it.
+The client reveals the new long-term PSK only after `server_kc` verifies, and only as `wrapped_psk` [sealed under the CPace output](#wrapping): a peer that cannot complete the PAKE - wrong pairing code, or a man in the middle relaying between two handshakes, whose differing `h` gives each leg a different `sid` - neither triggers the reveal nor can unwrap it.
 
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](connection.md#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
@@ -31,7 +31,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure and does not touch the [failure counter](#failure-counter). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure and does not touch the [failure counter](#failure-counter). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
 
 ### Unpaired Access
 
@@ -41,42 +41,42 @@ A client MAY admit a server with no pairing record to activate roles or declare 
 
 ### Pairing PSK Flow
 
-The Noise handshake completes using the Pairing PSK, authenticating both sides. The client proceeds straight to [`client/pair-finalize`](#client--server-clientpair-finalize).
+The Noise handshake completes using the pairing PSK, authenticating both sides. The client proceeds straight to [`client/pair-finalize`](#client--server-clientpair-finalize).
 
-**Lifecycle.** The client's Pairing PSK is generated from a CSPRNG per device - never a shared default - provisioned at manufacture or generated by the client, and persists across reboots. It is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate long-term [Sendspin PSK](README.md#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](management.md#server--client-managementset-pairing-config) (`pairing_psk.psk`) from a paired server. Rotation invalidates previously distributed copies but leaves established pairing records untouched.
+**Lifecycle.** The client's pairing PSK is generated from a CSPRNG per device - never a shared default - provisioned at manufacture or generated by the client, and persists across reboots. It is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate [long-term PSK](README.md#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](management.md#server--client-managementset-pairing-config) (`pairing_psk.psk`) from a paired server. Rotation invalidates previously distributed copies but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes with Pairing PSK
+    Note over Client,Server: Noise handshake completes with the pairing PSK
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: pairing_psk})
     Client->>Server: client/pair-finalize (long_term_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
 ```
 
-If a connection is already open under any other PSK - Sentinel or a long-term [Sendspin PSK](README.md#definitions) - when the operator picks `pairing_psk`, the server first [re-handshakes](connection.md#re-handshake) to the Pairing PSK before sending the `server/activate` shown above.
+If a connection is already open under any other PSK - Sentinel or a [long-term PSK](README.md#definitions) - when the operator picks `pairing_psk`, the server first [re-handshakes](connection.md#re-handshake) to the pairing PSK before sending the `server/activate` shown above.
 
 Two standing client obligations follow from this flow:
 
-1. The client MUST keep its Pairing PSK among its handshake PSK candidates whenever the method is [enabled](management.md#server--client-managementset-pairing-config), not only while a pairing activity is running: the server's re-handshake to the Pairing PSK succeeds only if the client already recognizes its `psk_id`.
-2. Before sending [`client/pair-finalize`](#client--server-clientpair-finalize), the client MUST verify that the connection's matched PSK is the Pairing PSK (the receiving side of the `pairing.method` invariant in [`server/activate`](messaging.md#server--client-serveractivate)); on mismatch it aborts with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
+1. The client MUST keep its pairing PSK among its handshake PSK candidates whenever the method is [enabled](management.md#server--client-managementset-pairing-config), not only while a pairing activity is running: the server's re-handshake to the pairing PSK succeeds only if the client already recognizes its `psk_id`.
+2. Before sending [`client/pair-finalize`](#client--server-clientpair-finalize), the client MUST verify that the connection's matched PSK is the pairing PSK (the receiving side of the `pairing.method` invariant in [`server/activate`](messaging.md#server--client-serveractivate)); on mismatch it aborts with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
 
-**Pairing Token.** A server needs both the [Sendspin Pairing PSK](README.md#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together in a version-0 [pairing token](#pairing-token):
+**Pairing Token.** A server needs both the [pairing PSK](README.md#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together in a version-0 [pairing token](#pairing-token):
 
 ```
 payload = client_key (32 bytes) || pairing_psk (32 bytes)
 ```
 
 - `client_key` - the raw 32-byte Curve25519 public key whose base64url form is the [`client_id`](connection.md#identities).
-- `pairing_psk` - the raw 32-byte [Sendspin Pairing PSK](README.md#definitions).
+- `pairing_psk` - the raw 32-byte [pairing PSK](README.md#definitions).
 
-The operator enters the token into the server to begin the flow. The Pairing PSK MUST be exposed as the token, not the bare PSK. Before pairing, the server MUST confirm the decoded `client_key` matches the `client_id` presented on the connection.
+The operator enters the token into the server to begin the flow. The pairing PSK MUST be exposed as the token, not the bare PSK. Before pairing, the server MUST confirm the decoded `client_key` matches the `client_id` presented on the connection.
 
 The reference vector for `client_key = 0x00 0x01 … 0x1f` and `pairing_psk = 0xe0 0xe1 … 0xff`:
 
@@ -93,7 +93,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term Sendspin PSK when re-verifying a paired device)
+    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term PSK when re-verifying a paired device)
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -116,7 +116,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
 ```
 
 **Binding values.** The Dynamic Pairing Code Flow introduces three values across two messages that bind the pairing code to the underlying Noise handshake:
@@ -179,7 +179,7 @@ sequenceDiagram
     participant Client
     participant Server
 
-    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term Sendspin PSK when re-verifying a paired device)
+    Note over Client,Server: Noise handshake completes (Sentinel PSK when unpaired, long-term PSK when re-verifying a paired device)
 
     Server->>Client: server/hello (name)
     Client->>Server: client/hello (supported_pair_methods)
@@ -200,7 +200,7 @@ sequenceDiagram
     Note over Client: Sent back-to-back, no server response awaited
     Client->>Server: client/pair-finalize (wrapped_psk)
     Server->>Client: server/pair-finalize
-    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new PSK.
+    Note over Client,Server: Both sides persist the pairing record. Server re-handshakes to the new long-term PSK.
 ```
 
 **Client verification.** On receipt of [`server/pair-confirm`](#server--client-serverpair-confirm), the client verifies the CPace MCF tag `server_kc`. On failure the client sends [`pair/abort`](#client--server-pairabort) with reason `pairing_code_mismatch`.
@@ -219,7 +219,7 @@ A **pairing token** is a single case-insensitive ASCII string carrying a pairing
 token = "SP:" || version || body
 ```
 
-- `version` - a single alphanumeric character selecting the payload the body carries. This document defines version `0` - a [Pairing PSK with the client identity](#pairing-psk-flow) - and version `1` - a per-session [dynamic pairing code](#dynamic-pairing-code-flow) in the `qr_code` emission format.
+- `version` - a single alphanumeric character selecting the payload the body carries. This document defines version `0` - a [pairing PSK with the client identity](#pairing-psk-flow) - and version `1` - a per-session [dynamic pairing code](#dynamic-pairing-code-flow) in the `qr_code` emission format.
 
 A payload becomes `body` by:
 
@@ -275,7 +275,7 @@ The four pairing message fields carry the corresponding CPace values, base64url-
 
 ### Wrapping
 
-In the code-based flows, two values cross the wire only sealed under the CPace output: the new PSK, carried as `wrapped_psk` in [`client/pair-finalize`](#client--server-clientpair-finalize), and - in the Dynamic Pairing Code Flow - the commitment opening `nonce_B`, carried as `wrapped_nonce_B` in [`client/pair-confirm`](#client--server-clientpair-confirm). Both sides derive a key per field:
+In the code-based flows, two values cross the wire only sealed under the CPace output: the new long-term PSK, carried as `wrapped_psk` in [`client/pair-finalize`](#client--server-clientpair-finalize), and - in the Dynamic Pairing Code Flow - the commitment opening `nonce_B`, carried as `wrapped_nonce_B` in [`client/pair-confirm`](#client--server-clientpair-confirm). Both sides derive a key per field:
 
 ```
 K_wrap = SHA-256(label || sid || ISK)
@@ -356,10 +356,10 @@ On receipt, the server verifies before processing [`client/pair-finalize`](#clie
 
 #### Client → Server: `client/pair-finalize`
 
-Delivers the long-term PSK for this (client, server) pair. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it starts the pairing [attempt](#entering-and-leaving-pairing) and is sent immediately after the [`server/activate`](messaging.md#server--client-serveractivate), carrying the PSK directly. Exactly one of the two fields is present.
+Delivers the long-term PSK established by this pairing. In flows that include a PAKE round, this message is sent immediately after [`client/pair-confirm`](#client--server-clientpair-confirm) without waiting for a server response, and carries the PSK [wrapped](#wrapping) under the CPace output. In the [Pairing PSK Flow](#pairing-psk-flow), it starts the pairing [attempt](#entering-and-leaving-pairing) and is sent immediately after the [`server/activate`](messaging.md#server--client-serveractivate), carrying the PSK directly. Exactly one of the two fields is present.
 
-- `long_term_psk?`: string - 43-character base64url-encoded 32-byte [Sendspin PSK](README.md#definitions) (no padding). [Pairing PSK Flow](#pairing-psk-flow) only
-- `wrapped_psk?`: string - 64-character base64url-encoded 48-byte [wrapping](#wrapping) of the new [Sendspin PSK](README.md#definitions) (no padding). Code-based flows only
+- `long_term_psk?`: string - 43-character base64url-encoded 32-byte [long-term PSK](README.md#definitions) (no padding). [Pairing PSK Flow](#pairing-psk-flow) only
+- `wrapped_psk?`: string - 64-character base64url-encoded 48-byte [wrapping](#wrapping) of the new [long-term PSK](README.md#definitions) (no padding). Code-based flows only
 
 #### Server → Client: `server/pair-finalize`
 
