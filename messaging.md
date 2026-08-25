@@ -61,8 +61,8 @@ The first byte of every binary message is its message ID. IDs are assigned from 
 | IDs | Assignment |
 |---|---|
 | 0 | JSON message body (UTF-8) |
-| 1 | Reserved for future use |
-| 2-3 | [Fragmentation](#fragmentation) |
+| 1 | [Fragmentation](#fragmentation) |
+| 2-3 | Reserved for future use |
 | 4-7 | Player role |
 | 8-11 | Artwork role |
 | 12-15 | Source role |
@@ -76,32 +76,26 @@ Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24
 
 ### Fragmentation
 
-A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message types.
+A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message type.
 
 **Wire format** (inside the AEAD-protected plaintext of each fragment frame):
 
-A fragmented message consists of an opening fragment-more frame (carrying `orig_type`), zero or more continuation fragment-more frames, and a closing fragment-end frame. The minimum is one fragment-more frame followed by one fragment-end frame.
+- First fragment: `[1][flags][orig_type][data]`
+- Subsequent fragments: `[1][flags][data]`
 
-Bit 0 is the last-fragment flag: `00000010` (2) is a fragment-more frame, `00000011` (3) is a fragment-end frame.
-
-- Fragment-more (type `2`):
-  - First fragment of a fragmented message: `[2][orig_type][data]`
-  - Subsequent non-final fragments: `[2][data]`
-- Fragment-end (type `3`): `[3][data]`
-
-The format of a type `2` frame depends on the receiver's state: when no fragmented message is in flight, a type `2` frame begins a new one and carries `orig_type`; when a fragmented message is already in flight, a type `2` frame is a continuation and carries only `data`.
+`flags` is a uint8. Bit 1 is set on the first fragment of a message and bit 0 on the last. Bits 2-7 are reserved and MUST be zero.
 
 The concatenated `data` from all fragments yields the original message's payload (the bytes that would have followed the message type byte in a non-fragmented message of type `orig_type`).
 
 **Constraints:**
 
-- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a fragment-end frame before sending any other frame in that direction, whether fragmented or not.
+- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other frame in that direction, whether fragmented or not.
 - Senders should not fragment messages that fit in a single non-fragmented frame.
-- A sender MUST NOT use a fragment type (`2` or `3`) as `orig_type`.
+- A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a fragment-more frame when no message is in flight, read `orig_type` from byte 1, then start a new buffer with the rest of the frame. On a fragment-more frame when a message is in flight, append the frame's data to the buffer. On a fragment-end frame, append the frame's data and dispatch the result as a single message of type `orig_type`, then clear the buffer.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with the rest of the frame; on any other fragment, append the frame's data to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a fragment-end frame received with no fragmented message in flight, a non-fragment frame received while a fragmented message is in flight in the same direction, and an `orig_type` of `2` or `3`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
 
