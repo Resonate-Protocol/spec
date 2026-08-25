@@ -108,6 +108,9 @@ sequenceDiagram
         Note over Client: Operator opens pairing window
     end
     Client->>Server: client/pair-init (commit_B)
+    opt digit_audio announced
+        Server->>Client: digit audio clip (binary), one per digit 0-9
+    end
     Server->>Client: server/pair-init (nonce_A)
     Note over Client: Derive pairing code from (h, nonce_A, nonce_B), emit via out-channel
     Note over Server: Operator enters pairing code
@@ -141,7 +144,11 @@ qr_code:  code     = digest[0..23]
 
 The hash input is the UTF-8 bytes of the literal label `"sendspin-pairing-code-derive-v1"` (no separator, no NUL terminator) followed by `h` (32 bytes, raw), `nonce_A` (32 bytes, raw), and `nonce_B` (32 bytes, raw). In the `digits` format the full 32-byte SHA-256 output is interpreted as an unsigned big-endian 256-bit integer and reduced modulo 10^6, zero-padded on the left to exactly 6 ASCII digits. The pairing code bytes fed into CPace as `PRS` are these 6 ASCII digits - the same per-digit encoding as the static pairing code. In the `qr_code` format the pairing code is binary - the first 24 bytes of the digest - and the code bytes fed into CPace as `PRS` are these 24 raw bytes.
 
-**Digits emission.** When emitting the pairing code through a spoken channel, the client SHOULD use the best-matching language it supports, treating the activation's [`languages`](messaging.md#server--client-serveractivate) as the language priority list under [RFC 4647](https://www.rfc-editor.org/rfc/rfc4647#section-3.4) Lookup matching, and falling back to its own default when nothing matches. The hint is informational and never grounds for [`pair/abort`](#client--server-pairabort); display emission is unaffected. Spoken emission SHOULD read single digits in the [presentation groups](#pairing-code-presentation), pausing between groups.
+**Digits emission.** A client that displays the pairing code follows [Pairing Code Presentation](#pairing-code-presentation). A client that speaks it reads single digits in the [presentation groups](#pairing-code-presentation); it SHOULD leave a short gap between digits and a longer one between groups. The digits themselves come from a **digit audio pack** supplied by the server: ten mono clips, one recording of each decimal digit `0`-`9`, trimmed to the spoken digit, in a language of the server's choosing.
+
+**Digit audio pack.** A speaker client advertises the pack it wants as `digit_audio` in its [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) - the `formats` it accepts, in descending preference, and `max_bytes`, the largest encoded pack size it accepts. The server picks the highest-priority format it can produce within `max_bytes` - servers MUST support all three codecs - and announces it as `digit_audio` in the pairing [`server/activate`](messaging.md#server--client-serveractivate). After [`client/pair-init`](#client--server-clientpair-init) it delivers the clips as [digit audio clip](#server--client-digit-audio-clip-binary) messages in ascending digit order, each at most 2 seconds of audio and together at most `max_bytes` encoded. [`server/pair-init`](#server--client-serverpair-init) then completes the pack. The client emits by playing the clip for each code digit in turn. The pack is presentation-only - clips never enter the derivation or `PRS` - and is discarded when the attempt ends. A `digit_audio` naming a format the client did not advertise, a clip over 2 seconds, a pack over `max_bytes`, a clip undecodable or whose embedded stream parameters contradict the announced format, or a pack still incomplete when `server/pair-init` arrives is a [protocol error](#protocol-errors).
+
+In initial pairing the pack comes from an unauthenticated peer, which thereby chooses what the client's speaker plays. The clip constraints keep each clip short, and the peer, unable to predict the code, cannot choose which clips play or in what order, so they cannot be strung into a longer message.
 
 **QR-code emission.** In the `qr_code` format the client presents the pairing code as a version-1 [pairing token](#pairing-token) with the 24-byte code as its payload (39 body characters), rendered as a QR code on its display. The server applies the token [decoding](#pairing-token) rules to operator input; the first 24 payload bytes are the entered pairing code.
 
@@ -289,20 +296,26 @@ with `label` `"sendspin-pair-psk-wrap-v1"` for `wrapped_psk` and `"sendspin-pair
 
 ### Protocol Errors
 
-A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
+A condition during pairing that no conformant peer produces - a malformed or missing field, a CPace share with the wrong length or encoding a low-order point, a revealed nonce that does not match its commitment, an entered code that fails the binding check, a `wrapped_nonce_B` or `wrapped_psk` that fails to decrypt, a malformed digit audio pack - is a **protocol error**: the detecting side closes the WebSocket without sending any application-level error message, and persists nothing.
 
 ### Client → Server: `client/hello` pair-method descriptor
 
 Each entry in `supported_pair_methods` in [`client/hello`](messaging.md#client--server-clienthello) is a descriptor object that names the pairing method and advertises the kind of operator interaction the client expects so the server can render appropriate UX.
 
 - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - the pairing method identifier.
-- `out_channels?`: ('display' | 'speaker')[] - informational hint for `dynamic_pairing_code` only, listing the channels through which the per-session pairing code is conveyed to the operator.
+- `out_channels?`: ('display' | 'speaker')[] - the channels through which the per-session pairing code is conveyed to the operator. Required on `dynamic_pairing_code` descriptors, absent on others.
 - `formats?`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Required on `dynamic_pairing_code` descriptors, absent on others. Non-empty; `qr_code` requires a display able to render a QR code.
+- `digit_audio?`: object - the server-supplied [digit audio pack](#dynamic-pairing-code-flow) the client wants. Required on `dynamic_pairing_code` descriptors whose `out_channels` include `'speaker'`; absent otherwise.
+  - `formats`: object[] - formats the client accepts, in descending preference
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
+    - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
+  - `max_bytes`: integer - maximum total encoded size of the ten clips in bytes
 - `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. When the secret is rotated, the client updates the hint accordingly.
 
 ### Messages
 
-The pairing messages below are listed in the order they appear in the Dynamic Pairing Code Flow (the most complete sequence). The Static Pairing Code Flow omits the [`server/pair-init`](#server--client-serverpair-init) message and the `commit_B` / `wrapped_nonce_B` fields; the Pairing PSK Flow additionally omits all `pair-pending`, `pair-init`, `pair-auth`, and `pair-confirm` messages.
+The pairing messages below are listed in the order they appear in the Dynamic Pairing Code Flow (the most complete sequence), except the binary [digit audio clip](#server--client-digit-audio-clip-binary), which comes last. The Static Pairing Code Flow omits the [`server/pair-init`](#server--client-serverpair-init) message and the `commit_B` / `wrapped_nonce_B` fields; the Pairing PSK Flow additionally omits all `pair-pending`, `pair-init`, `pair-auth`, and `pair-confirm` messages.
 
 **Sequence violations.** A pairing message that is out of sequence for the selected method and current state - and not covered by the silent-discard rules in [Entering and leaving pairing](#entering-and-leaving-pairing) - is a [protocol error](#protocol-errors).
 
@@ -316,7 +329,7 @@ Reports that the selected attempt is gesture-gated and no [pairing window](#pair
 
 #### Client → Server: `client/pair-init`
 
-Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and - when the attempt is gesture-gated (see [Pairing Window](#pairing-window)) - a window is open; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) (dynamic pairing code) before receiving this message.
+Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and - when the attempt is gesture-gated (see [Pairing Window](#pairing-window)) - a window is open; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) and the [digit audio clips](#server--client-digit-audio-clip-binary) (dynamic pairing code) before receiving this message.
 
 - `pairing_index`: integer - see [Pairing index](#messages); only a match starts the attempt
 - `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in the [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow); absent in the [Static Pairing Code Flow](#static-pairing-code-flow).
@@ -327,7 +340,7 @@ Server's nonce contribution in the [Dynamic Pairing Code Flow](#dynamic-pairing-
 
 - `nonce_A`: string - 32 bytes from a CSPRNG, base64url-encoded (43 chars). See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)
 
-Upon receipt, the client derives and emits the pairing code; the operator then types or scans it into the server.
+When the activation announced `digit_audio`, this message follows the ten [digit audio clips](#server--client-digit-audio-clip-binary) and completes the pack. Upon receipt, the client derives and emits the pairing code; the operator then types or scans it into the server.
 
 #### Server → Client: `server/pair-auth`
 
@@ -381,3 +394,19 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
+
+#### Server → Client: Digit Audio Clip (Binary)
+
+One clip of a [digit audio pack](#dynamic-pairing-code-flow).
+
+Sent only in an attempt whose [`server/activate`](messaging.md#server--client-serveractivate) announced `digit_audio`, after [`client/pair-init`](#client--server-clientpair-init) and before [`server/pair-init`](#server--client-serverpair-init): ten messages in ascending digit order, together at most the descriptor's [`max_bytes`](#client--server-clienthello-pair-method-descriptor). A clip outside that window, out of order, duplicated, or with a digit above 9 is a [sequence violation](#messages).
+
+- Byte 0: message type `2` (uint8)
+- Byte 1: digit (uint8) - the decimal digit `0`-`9` the clip speaks
+- Rest of bytes: the clip in the announced format
+
+**Clip contents:** Each clip carries one whole spoken digit - mono, at most 2 seconds - in the format announced in [`server/activate`](messaging.md#server--client-serveractivate); a clip whose embedded stream parameters contradict it - a FLAC STREAMINFO with other channels, sample rate, or bit depth, an OpusHead with other channels - is malformed. Per codec:
+
+- `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample. `codec_header` is absent.
+- `flac`: one or more complete FLAC frames. `codec_header` is required and carries the `fLaC` stream marker followed by the STREAMINFO metadata block.
+- `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream. `codec_header` is absent; the decoder outputs at the announced `sample_rate`.

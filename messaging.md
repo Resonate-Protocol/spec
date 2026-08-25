@@ -62,7 +62,8 @@ The first byte of every binary message is its message ID. IDs are assigned from 
 |---|---|
 | 0 | JSON message body (UTF-8) |
 | 1 | [Fragmentation](#fragmentation) |
-| 2-3 | Reserved for future use |
+| 2 | [Pairing](pairing.md#server--client-digit-audio-clip-binary) |
+| 3 | Reserved for future use |
 | 4-7 | Player role |
 | 8-11 | Artwork role |
 | 12-15 | Source role |
@@ -156,6 +157,7 @@ The same `noise/handshake` message is used for the in-band [re-handshake](connec
 First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`). This message will be followed by a [`client/hello`](#client--server-clienthello) message from the client.
 
 - `name`: string - friendly name of the server
+- `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
 
 ### Client → Server: `client/hello`
 
@@ -200,8 +202,12 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
-  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](pairing.md#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code.
-  - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/rfc/rfc5646) language tags in descending operator preference (e.g. `["ca", "es", "en"]`), for spoken [pairing code emission](pairing.md#dynamic-pairing-code-flow). Optional when `method` is `'dynamic_pairing_code'` with the `digits` emission format; absent otherwise.
+  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](pairing.md#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code, and - for a client whose descriptor carries `digit_audio` - `digits` only when it can produce one of its `formats` within its `max_bytes`.
+  - `digit_audio?`: object - announces server-supplied [digit audio](pairing.md#dynamic-pairing-code-flow) clips for this attempt, in one of the `digit_audio.formats` from the client's descriptor. Required when `format` is `'digits'` and the client's descriptor carries `digit_audio`; absent otherwise.
+    - `codec`: 'opus' | 'flac' | 'pcm'
+    - `sample_rate`: integer - sample rate in Hz
+    - `bit_depth`: integer - bit depth; ignored for `opus`
+    - `codec_header?`: string - codec header encoded as standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included). Required for `flac`, absent otherwise
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](connection.md#encryption):
 
