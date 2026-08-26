@@ -115,7 +115,7 @@ A player MUST NOT report `available: true` until its time filter has converged e
 
 ### Transmit timestamps
 
-Two things report when the server transmitted a message: the `server_transmitted` field, and the `send_ahead` interval carried in binary audio chunks. The server takes this time as late as its implementation permits, at the point the encoded bytes are handed to the transport for writing, after any application-level queueing or per-client scheduling. A server MUST NOT stamp a message at the time it is enqueued for later transmission.
+Two things report when the server transmitted a message: the `server_transmitted` field, and the `send_ahead` interval carried in binary audio chunks. The server takes this time as late as its implementation permits, after any application-level queueing or per-client scheduling, immediately before the message is encrypted for transmission. A server MUST NOT stamp a message at the time it is enqueued for later transmission.
 
 Delay accruing after that point - transport send buffering, an earlier fragmented message still in flight, link contention - is not represented in the value and is observed by the client as network delay.
 
