@@ -1658,10 +1658,10 @@ The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello)
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
     - `format`: 'jpeg' | 'png' - image format identifier
-    - `media_width`: integer - width in pixels of the delivered image
-    - `media_height`: integer - height in pixels of the delivered image
+    - `width`: integer - width in pixels of the delivered image
+    - `height`: integer - height in pixels of the delivered image
 
-The server MUST deliver each image at exactly the `media_width` by `media_height` declared for the channel. It MUST scale the source image to fit within those dimensions preserving its aspect ratio, MUST pad the remaining area with black, and MUST NOT crop the image.
+The server MUST deliver each image at exactly the `width` by `height` declared for the channel. It MUST scale the source image to fit within those dimensions preserving its aspect ratio, MUST pad the remaining area with black, and MUST NOT crop the image.
 
 **Note:** Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
 
@@ -1681,8 +1681,8 @@ Response when an `artwork` stream is active: [`stream/start`](#server--client-st
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
   - `source?`: 'album' | 'artist' | 'none' - artwork source type
   - `format?`: 'jpeg' | 'png' - requested image format identifier
-  - `media_width?`: integer - requested width in pixels
-  - `media_height?`: integer - requested height in pixels
+  - `width?`: integer - requested width in pixels
+  - `height?`: integer - requested height in pixels
 
 ### Server → Client: `stream/start` artwork object
 
@@ -1697,7 +1697,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 The `channels` array covers every channel index the client declared in [`artwork@v1_support`](#client--server-clienthello-artworkv1-support-object) in the same order. A channel the server is not streaming is represented as `source: 'none'`.
 
-Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source` and `format` MUST match the declaration, and `width`/`height` MUST equal the declared `media_width`/`media_height`.
+Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source`, `format`, `width`, and `height` MUST match the declaration.
 
 **Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
 
