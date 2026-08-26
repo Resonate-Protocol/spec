@@ -1697,7 +1697,7 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 
 The `channels` array covers every channel index the client declared in [`artwork@v1_support`](#client--server-clienthello-artworkv1-support-object) in the same order. A channel the server is not streaming is represented as `source: 'none'`.
 
-Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by [`stream/request-format`](#client--server-streamrequest-format-artwork-object). The `source` and `format` MUST match the declaration, and `width`/`height` MUST equal the declared `media_width`/`media_height`.
+Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source` and `format` MUST match the declaration, and `width`/`height` MUST equal the declared `media_width`/`media_height`.
 
 **Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
 
