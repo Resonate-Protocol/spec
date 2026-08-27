@@ -8,7 +8,7 @@ All `management/*` requests are answered by a single [`management/result`](#clie
 
 ### Records
 
-Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](README.md#definitions); a session authenticated by any record is [paired](README.md#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](README.md#definitions); a session authenticated by any record is a [paired session](README.md#definitions). Records come in two kinds:
 
 - **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.

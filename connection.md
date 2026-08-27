@@ -131,7 +131,7 @@ A `psk_id` lookup miss means the server referenced a credential the client canno
 
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](pairing.md#pairing) or [management](management.md#records).
 
-The session proceeds as an ordinary [unpaired](README.md#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
+The session proceeds as an ordinary Sentinel connection, an [unpaired session](README.md#definitions), except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Prologue
 

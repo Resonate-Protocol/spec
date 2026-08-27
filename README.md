@@ -270,7 +270,7 @@ A `psk_id` lookup miss means the server referenced a credential the client canno
 
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](#pairing) or [management](#records).
 
-The session proceeds as an ordinary [unpaired](#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
+The session proceeds as an ordinary Sentinel connection, an [unpaired session](#definitions), except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Prologue
 
@@ -707,7 +707,7 @@ Upon receiving this message, the server should initiate the disconnect.
   - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
-  - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` on an [unpaired](#definitions) session), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
+  - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` on an [unpaired session](#definitions)), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
@@ -757,7 +757,7 @@ A server MAY send such a cancelling `server/activate` at any point during a pair
 
 ### Unpaired Access
 
-A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](#definitions), so [management](#management) operations remain unavailable. Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, the toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
+A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. This is an [unpaired session](#definitions), so [management](#management) operations remain unavailable. Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, the toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
 
 On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist and SHOULD be revocable by the operator. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate).
 
@@ -1114,7 +1114,7 @@ All `management/*` requests are answered by a single [`management/result`](#clie
 
 ### Records
 
-Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](#definitions); a session authenticated by any record is [paired](#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](#definitions); a session authenticated by any record is a [paired session](#definitions). Records come in two kinds:
 
 - **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
