@@ -1637,7 +1637,7 @@ Clients keep a **current state** plus at most one **pending update**. The curren
 
 ##### Server rules for scheduled metadata
 
-Servers SHOULD NOT schedule an update more than 20 seconds ahead.
+Servers SHOULD NOT send a scheduled update more than 20 seconds before its `timestamp`.
 
 To cancel a scheduled update, resend the current state with a past or present `timestamp`. A new future-timestamped message replaces the scheduled update rather than queueing behind it; to show two updates in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
@@ -1732,7 +1732,7 @@ The timestamp indicates when this artwork should be displayed. Per channel, clie
 
 #### Server rules for scheduled artwork
 
-Servers SHOULD NOT schedule an image more than 20 seconds ahead.
+Servers SHOULD NOT send a scheduled image more than 20 seconds before its timestamp.
 
 To cancel a scheduled image, resend the one that should currently be showing. A new future-timestamped image replaces the scheduled image rather than queueing behind it; to show two images in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
@@ -1857,6 +1857,6 @@ Clients keep a **current state** plus at most one **pending update**. The curren
 
 ##### Server rules for scheduled colors
 
-Servers SHOULD NOT schedule an update more than 20 seconds ahead.
+Servers SHOULD NOT send a scheduled update more than 20 seconds before its `timestamp`.
 
 To cancel a scheduled update, resend the current state with a past or present `timestamp`. A new future-timestamped message replaces the scheduled update rather than queueing behind it; to show two updates in sequence, send the second only after the first's timestamp has passed on the server's clock.
