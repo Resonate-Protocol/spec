@@ -1728,27 +1728,41 @@ Each channel's configuration MUST match the client's current capability for that
 
 ### Server → Client: Artwork (Binary)
 
-Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate).
+Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate). A rejected announce still starts its transfer, whose parts are likewise rejected.
 
-- Byte 0: message type `8`-`11` (uint8) - corresponds to artwork channel 0-3 respectively
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when the image should be displayed by the device
-- Rest of bytes: encoded image
+An image is transferred as an announce followed by the parts of the encoded image, all on its channel. The announce carries the image's total size and no image data.
 
-The message type determines which artwork channel this image is for:
-- Type `8`: Channel 0
-- Type `9`: Channel 1
-- Type `10`: Channel 2
-- Type `11`: Channel 3
+**Wire format:**
 
-The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**. A message whose timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), is still in the future becomes the pending image, replacing any held one, and becomes current when that moment is reached. A message whose translated timestamp is in the past or present becomes current immediately and discards any held pending image; artwork is never dropped for lateness. Clients MAY ease into the pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends it if it still applies.
+- Announce: `[type][flags][timestamp][total_size]`
+- Part: `[type][flags][data]`
+- Cancel: `[type][flags]`
 
-**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty binary message (only the message type byte and timestamp, with no image data) for that channel. An empty message follows the same rules as any other image: a future timestamp schedules the clear.
+The fields are:
+
+- `type` (byte 0): uint8, `8`-`11` - corresponds to artwork channel 0-3 respectively
+- `flags` (byte 1): uint8 - bit 0 is set on an announce and bit 1 on a cancel message (defined below); a part sets neither. Bits 2-7 are reserved and MUST be zero
+- `timestamp` (announce, bytes 2-9): big-endian int64 - server clock time in microseconds when the image should be displayed by the device
+- `total_size` (announce, bytes 10-13): big-endian uint32 - size in bytes of the encoded image
+- `data` (part, rest of bytes): the next bytes of the encoded image
+
+The concatenated `data` of all parts is the encoded image; the transfer is complete when the received data reaches `total_size`. An announce with `total_size` `0` completes immediately, with no parts. An artwork message, after the type byte, MUST NOT exceed 65518 bytes, so that it fits in a single Noise transport message without [fragmentation](#fragmentation).
+
+Per channel, at most one image transfer is in flight at a time: a transfer is in flight from its announce until it completes or its partly received image is discarded. Transfers on different channels are independent, and any other messages MAY be sent between the messages of a transfer.
+
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**: the most recently announced image, from its announce until it becomes current. An announce discards any held pending image, partly received or complete. The pending image becomes current once its transfer is complete and its timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), has been reached; artwork is never dropped for lateness. Clients MAY ease into a complete pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends the image if it still applies.
+
+**Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty image for that channel: an announce with `total_size` `0`. An empty image follows the same rules as any other image: a future timestamp schedules the clear.
+
+**Cancel message:** A message consisting of only the `type` and `flags` bytes, with bit 1 set. It discards the channel's pending image, taking effect immediately; the current image is unaffected.
+
+**Malformed sequences** are protocol errors; the client MUST close the connection. They are: a message shorter than 2 bytes or exceeding the size cap above, an announce whose length is not 14 bytes, a cancel message longer than 2 bytes, a part received with no transfer in flight on that channel, a part whose `data` would extend past `total_size`, a nonzero reserved flag bit, and a message with bit 0 and bit 1 both set.
 
 #### Server rules for scheduled artwork
 
 Servers SHOULD NOT send a scheduled image more than 20 seconds before its timestamp.
 
-To cancel a scheduled image, resend the one that should currently be showing. A new future-timestamped image replaces the scheduled image rather than queueing behind it; to show two images in sequence, send the second only after the first's timestamp has passed on the server's clock.
+To cancel a scheduled image, send a cancel message. A new future-timestamped image replaces the scheduled image rather than queueing behind it; to show two images in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
 ## Visualizer messages
 This section describes messages specific to clients with the `visualizer` role, which create visual representations of the audio being played. Visualizer clients receive audio analysis data computed from the audio currently playing in the group.
