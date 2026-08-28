@@ -743,7 +743,7 @@ Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the d
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
-Whether an implemented method is enabled is local client configuration, changed only through a manufacturer-defined action. A disabled method is omitted from [`supported_pair_methods`](#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](#pre-shared-key)).
+A disabled method is omitted from [`supported_pair_methods`](#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](#pre-shared-key)).
 
 ### Pairing Records
 
