@@ -743,7 +743,7 @@ Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dyn
 
 ### Pairing Records
 
-Each successful pairing produces a pairing record: the new [long-term PSK](#definitions) persisted together with the server's `server_id` (see [Pre-Shared Key](#pre-shared-key)). A repeat pairing with a server that already holds a record replaces that record.
+Each successful pairing produces a pairing record: the new [long-term PSK](#definitions) persisted together with the server's `server_id`. A repeat pairing with a server that already holds a record replaces that record.
 
 A client MUST be able to store at least 5 pairing records; more is allowed. When a pairing completes at capacity, the client MUST evict an existing record so that the new record persists - a pairing never fails for lack of record storage. Which record is evicted is implementation-defined (for example, the least recently used), except that the client MUST NOT evict the record backing a currently-open connection.
 
