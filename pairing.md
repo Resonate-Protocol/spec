@@ -2,7 +2,7 @@
 
 Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](connection.md#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](connection.md#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](connection.md#re-handshake) to the newly delivered `long_term_psk`, promoting the channel to a paired session without closing the WebSocket.
 
-This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement at most one pairing-code method: static or dynamic, not both.
+This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement at most one pairing-code method: Static Pairing Code or Dynamic Pairing Code, not both.
 
 ### Methods
 
@@ -304,6 +304,8 @@ A condition during pairing that no conformant peer produces - a malformed or mis
 ### Client → Server: `client/hello` pair-method descriptor
 
 `supported_pair_methods` in [`client/hello`](messaging.md#client--server-clienthello) is an object keyed by pairing method identifier. Each value is a descriptor object that advertises the kind of operator interaction the client expects so the server can render appropriate UX.
+
+A client MUST NOT list both `static_pairing_code` and `dynamic_pairing_code` (see [Methods](#methods)). A server that nevertheless receives both MUST disregard the `static_pairing_code` descriptor and proceed as if only `dynamic_pairing_code` were advertised, so a non-conformant advertisement degrades to the safer method rather than to undefined behavior.
 
 - `pairing_psk?`: object
   - `locations?`: ('device' | 'leaflet' | 'operator')[]
