@@ -1136,7 +1136,7 @@ Sent only in an attempt whose [`server/activate`](#server--client-serveractivate
 
 - `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample.
 - `flac`: a complete FLAC stream - `fLaC` marker, STREAMINFO block, frames.
-- `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream; the decoder outputs at the announced `sample_rate`.
+- `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream.
 
 ## Management
 
