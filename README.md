@@ -164,7 +164,6 @@ The TXT `name` SHOULD match the `name` the client sends in [`client/hello`](#cli
 
 A client holds at most one admitted connection at a time, classified by the highest-ranked activity in its declared [`activities`](#server--client-serveractivate); from highest to lowest:
 
-- `'management'`
 - `'playback'`
 - `'pairing'`
 
@@ -242,7 +241,7 @@ psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 
 The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category. `psk_category` declares which category the server is using the referenced PSK as - `'lt'` (long-term), `'pr'` (pairing), or `'sn'` (Sentinel) - so a match binds both sides to the same category, which determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
-The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would mean the same bytes serve as a PSK in both, exposing the stronger credential through the weaker channel (the [pairing token](#pairing-token) distributes the pairing PSK in cleartext, and the Sentinel PSK is public). Clients enforce this when records are configured (see [Management](#records)).
+The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would mean the same bytes serve as a PSK in both, exposing the stronger credential through the weaker channel (the [pairing token](#pairing-token) distributes the pairing PSK in cleartext, and the Sentinel PSK is public). Clients enforce this whenever a PSK is generated or provisioned: a client generating a [long-term PSK](#definitions) during [pairing](#pairing) regenerates on collision.
 
 The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
 
@@ -258,24 +257,21 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
                 = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
 ```
 
-The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
+The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a [disabled pairing method](#pairing) is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
 
-Two storage variants are supported for [long-term PSK](#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
-
-- **Stored-pubkey model**: each long-term PSK is persisted alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
-- **Shared-PSK model**: PSKs are persisted without an associated `server_id`; the `server_id` from [`server/init`](#server--client-serverinit) is accepted at face value. Convenient for storage-constrained clients, but with weaker security properties - multiple servers may share the same PSK.
+Each [long-term PSK](#definitions) is persisted in a [pairing record](#pairing-records) alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
 
 ### Sentinel Fallback
 
-A `psk_id` lookup miss means the server referenced a credential the client cannot use: the client lost its pairing record (e.g., a [Factory Reset](#definitions) or storage failure), an interrupted [pairing finalize](#server--client-serverpair-finalize) left the client without the record the server persisted, the referenced PSK belongs to a disabled pairing method, or the client holds the referenced PSK under a different category than the declared `psk_category` (e.g., a removed record's PSK later configured as the pairing PSK). On a lookup miss in the initial handshake the client completes the second handshake message with the Sentinel PSK instead of failing. The fallback applies only there: a miss during a [re-handshake](#re-handshake), and a failed stored-pubkey post-match check (a misbinding, not a miss), fail the handshake as before.
+A `psk_id` lookup miss means the server referenced a credential the client cannot use: the client lost its pairing record (e.g., a [Factory Reset](#definitions), [eviction](#pairing-records), or storage failure), an interrupted [pairing finalize](#server--client-serverpair-finalize) left the client without the record the server persisted, the referenced PSK belongs to a disabled pairing method, or the client holds the referenced PSK under a different category than the declared `psk_category` (e.g., a removed record's PSK later configured as the pairing PSK). On a lookup miss in the initial handshake the client completes the second handshake message with the Sentinel PSK instead of failing. The fallback applies only there: a miss during a [re-handshake](#re-handshake), and a failed stored-pubkey post-match check (a misbinding, not a miss), fail the handshake as before.
 
-The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](#pairing) or [management](#records).
+The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only as described in [Pairing Records](#pairing-records).
 
 The session proceeds as an ordinary [unpaired](#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Locked-Down Clients
 
-A client is **locked down** when it admits no [unpaired access](#unpaired-access) and offers no pairing method (every implemented method [disabled](#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](#server--client-serverhello) with [`client/goodbye`](#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](#client--server-clienthello) and closes.
+A client is **locked down** when it admits no [unpaired access](#unpaired-access) and offers no pairing method (every implemented method [disabled](#pairing)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](#server--client-serverhello) with [`client/goodbye`](#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](#client--server-clienthello) and closes.
 
 ### Prologue
 
@@ -316,7 +312,7 @@ WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages
 
 All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
 
-**Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel from the server to the client, and `client-stream/` those that control a binary channel from the client to the server; the two kinds of channel are independent and have separate lifetimes. `group/`, `management/`, `pair/`, and `noise/` name a subject. Only `client/`, `server/`, and `client-stream/` imply a direction; for every other prefix each message's definition gives it.
+**Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel from the server to the client, and `client-stream/` those that control a binary channel from the client to the server; the two kinds of channel are independent and have separate lifetimes. `group/`, `pair/`, and `noise/` name a subject. Only `client/`, `server/`, and `client-stream/` imply a direction; for every other prefix each message's definition gives it.
 
 **Forward compatibility.** Clients and servers MUST ignore unrecognized `payload` fields (keys not defined for the message) rather than treating them as an error. Clients and servers MUST NOT send fields the specification does not define for the message, other than the `_`-prefixed [application-specific role](#application-specific-roles) objects a message explicitly permits.
 
@@ -416,7 +412,7 @@ This section describes the fundamental messages that establish communication bet
 
 Every client and server must implement all messages in this section regardless of their specific roles. Role-specific object details are documented in their respective role sections and need to be implemented only if the client supports that role.
 
-[Management](#management) messages are likewise required for all clients and servers. [Pairing](#pairing) messages are required for all servers; clients implement the subset matching their advertised pairing methods.
+[Pairing](#pairing) messages are required for all servers; clients implement the subset matching their advertised pairing methods.
 
 ### Client → Server: `client/init`
 
@@ -487,7 +483,7 @@ Players that can output audio should have the role `player`.
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). An implemented method that is [disabled](#server--client-managementset-pairing-config) is omitted.
+- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). An implemented method that is [disabled](#pairing) is omitted. Every client implements at least the Pairing PSK method (see [Pairing](#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
   - `enabled`: boolean
 
@@ -499,7 +495,7 @@ A server MUST NOT activate a role version that was listed in `supported_roles` w
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
 
-- `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
+- `activities`: ('playback' | 'pairing')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
@@ -509,7 +505,7 @@ The activity sets the server may legitimately declare are constrained by which P
 
 | PSK matched | Allowed activity sets |
 |---|---|
-| [long-term PSK](#definitions) | any subset of `{'playback', 'management'}` |
+| [long-term PSK](#definitions) | `[]` or `['playback']` |
 | [pairing PSK](#definitions) | `['pairing']` |
 | [Sentinel PSK](#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
 
@@ -525,7 +521,7 @@ The activity sets the server may legitimately declare are constrained by which P
 - If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `'pairing'` is in `activities` with a `pairing.method` the matched PSK disallows or the client does not currently offer, or a `pairing.format` the client does not currently offer - reply with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`, leaving the connection open. The check uses the live pairing configuration, which may have drifted from [`supported_pair_methods`](#client--server-clienthello); the server may re-activate, or [re-handshake](#re-handshake) for a fresh advertisement.
 
-**Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['playback', 'management']`, no unpaired-access setting makes that set allowed on the Sentinel PSK, so the reason is `'unauthorized'`.
+**Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['playback', 'pairing']`, no unpaired-access setting makes that set allowed on the Sentinel PSK, so the reason is `'unauthorized'`.
 
 Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 
@@ -695,12 +691,11 @@ Every message MUST carry the full group state.
 
 ### Server → Client: `server/unpair`
 
-Sent by a paired server to drop its own pairing record from the client. Valid at any time regardless of the current `activities`; does not require `'management'` in the activity set. No payload fields.
+Sent by a paired server to drop its own pairing record from the client. Valid at any time regardless of the current `activities`. No payload fields.
 
 Client behavior:
 
 - Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
-- If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](#server--client-managementremove-record).
 - If the session is [unpaired](#definitions), there is no record to remove, so ignore the message and continue unchanged.
 
 ### Client → Server: `client/goodbye`
@@ -714,10 +709,10 @@ Upon receiving this message, the server should initiate the disconnect.
   - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
-  - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` on an [unpaired](#definitions) session), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
+  - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
   - `locked_down` - the client is [locked down](#locked-down-clients), so an unpaired server can neither use nor pair it. Sent in place of [`client/hello`](#client--server-clienthello). Server should not auto-reconnect
-  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
+  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'playback'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
 **Note:** On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
@@ -746,7 +741,19 @@ The client reveals the new long-term PSK only after `server_kc` verifies, and on
 
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
-Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code` - but SHOULD implement `static_pairing_code` too, shipped [disabled](#server--client-managementset-pairing-config) with no pairing code provisioned. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
+Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code` - but SHOULD implement `static_pairing_code` too, shipped disabled with no pairing code provisioned. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
+
+Whether an implemented method is enabled is local client configuration, changed only through a manufacturer-defined action; there is no remote toggle. A disabled method is omitted from [`supported_pair_methods`](#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](#pre-shared-key)).
+
+### Pairing Records
+
+Each successful pairing produces a pairing record: the new [long-term PSK](#definitions) persisted together with the server's `server_id` (see [Pre-Shared Key](#pre-shared-key)). A repeat pairing with a server that already holds a record replaces that record.
+
+A client MUST be able to store at least 5 pairing records; more is allowed. When a pairing completes at capacity, the client MUST evict an existing record so that the new record persists - a pairing never fails for lack of record storage. Which record is evicted is implementation-defined (for example, the least recently used), except that the client MUST NOT evict the record backing a currently-open connection.
+
+Eviction needs no wire signal. An evicted server's next handshake references a `psk_id` the client no longer holds and lands in the [Sentinel Fallback](#sentinel-fallback): the server receives an authenticated credential-mismatch signal and can offer its operator re-pairing.
+
+Beyond eviction and replacement, a record is removed only by [`server/unpair`](#server--client-serverunpair) or a [Factory Reset](#definitions).
 
 ### Entering and leaving pairing
 
@@ -764,7 +771,7 @@ A server MAY send such a cancelling `server/activate` at any point during a pair
 
 ### Unpaired Access
 
-A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](#definitions), so [management](#management) operations remain unavailable. Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, the toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
+A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](#definitions). Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, changing it is a local client action (manufacturer-defined), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
 
 On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist, MUST be revocable by the operator, and MUST be discarded on a successful pairing. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate). The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
 
@@ -776,7 +783,7 @@ While a client is unapproved, the server SHOULD identify and present it to the o
 
 The Noise handshake completes using the pairing PSK, authenticating both sides. The client proceeds straight to [`client/pair-finalize`](#client--server-clientpair-finalize).
 
-**Lifecycle.** The client's pairing PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices, whether provisioned at manufacture or generated by the client. It persists across reboots and is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`pairing_psk.psk`) from a paired server. Rotation invalidates previously distributed copies but leaves established pairing records untouched.
+**Lifecycle.** The client's pairing PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices, whether provisioned at manufacture or generated by the client. It persists across reboots and is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined). Rotation invalidates previously distributed copies but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
@@ -797,7 +804,7 @@ If a connection is already open under any other PSK - Sentinel or a [long-term P
 
 Two standing client obligations follow from this flow:
 
-1. The client MUST keep its pairing PSK among its handshake PSK candidates whenever the method is [enabled](#server--client-managementset-pairing-config), not only while a pairing activity is running: the server's re-handshake to the pairing PSK succeeds only if the client already recognizes its `psk_id`.
+1. The client MUST keep its pairing PSK among its handshake PSK candidates whenever the method is enabled, not only while a pairing activity is running: the server's re-handshake to the pairing PSK succeeds only if the client already recognizes its `psk_id`.
 2. Before sending [`client/pair-finalize`](#client--server-clientpair-finalize), the client MUST verify that the connection's matched PSK is the pairing PSK (the receiving side of the `pairing.method` invariant in [`server/activate`](#server--client-serveractivate)); on mismatch it aborts with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`.
 
 **Pairing Token.** A server needs both the [pairing PSK](#definitions) and the client's static public key to select and verify the client's Noise identity. The two are distributed together in a version-0 [pairing token](#pairing-token):
@@ -910,7 +917,7 @@ Brute-force protection for the Dynamic Pairing Code Flow is built around a failu
 
 Pairing with a fixed pairing code. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. Every attempt is gesture-gated by a [pairing window](#pairing-window).
 
-**Lifecycle.** The static pairing code is a fixed 8-digit value. A factory-provisioned pairing code MUST be drawn uniformly at random from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`static_pairing_code.code`) from a paired server. Rotation invalidates a previously printed or distributed pairing code but leaves established pairing records untouched.
+**Lifecycle.** The static pairing code is a fixed 8-digit value. A factory-provisioned pairing code MUST be drawn uniformly at random from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined). Rotation invalidates a previously printed or distributed pairing code but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
@@ -986,7 +993,7 @@ An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#cli
 
 Pairing Window mechanics:
 
-- **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action - or a paired server via [`management/open-pairing-window`](#server--client-managementopen-pairing-window). Gestures SHOULD be deliberate and hard to induce remotely.
+- **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
 - **Window lifetime.** From window opening until [`client/pair-init`](#client--server-clientpair-init) is sent. Recommended 5 minutes. On expiry, the window closes silently.
 - **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
 
@@ -1045,8 +1052,6 @@ A condition during pairing that no conformant peer produces - a malformed or mis
 `locations` is an informational hint listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. A printed pairing PSK MUST be rendered as a QR code of its [pairing token](#pairing-token). When the secret is rotated, the client updates the hint accordingly.
 
 A server MUST ignore a key it does not recognize - leaving its value unvalidated - and select only among the rest. It MUST likewise ignore unrecognized `formats`, `out_channels`, and `locations` values, treating a `dynamic_pairing_code` left with no recognized format or no recognized channel as an unrecognized key; an unrecognized `digit_audio.codec` is treated as `'speaker'` being absent. Identifiers not defined here are reserved for future revisions of this specification. As with [unimplemented roles](#detecting-outdated-servers), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
-
-The same descriptors are reported for every implemented method, enabled or not, by [`management/get-pairing-config`](#server--client-managementget-pairing-config).
 
 ### Messages
 
@@ -1145,160 +1150,6 @@ Sent only in a `digits` attempt with a speaker client, after [`client/pair-init`
 - `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample.
 - `flac`: a complete FLAC stream - `fLaC` marker, STREAMINFO block, frames.
 - `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream.
-
-## Management
-
-This section covers the management commands a paired server may issue.
-
-Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [long-term PSK](#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
-
-All `management/*` requests are answered by a single [`management/result`](#client--server-managementresult) message. At most one management request may be in flight per connection; in-order WebSocket delivery makes the reply unambiguous.
-
-### Records
-
-Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](#definitions), so any session it authenticates is [paired](#definitions). Records come in two kinds:
-
-- **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
-- **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
-
-Across all record operations, a record is identified by its `psk_id` (see [Pre-Shared Key](#pre-shared-key) for the derivation).
-
-#### Server → Client: `management/list-records`
-
-No payload fields.
-
-On success, `data: { records: object[] }`. Each entry in `records`:
-
-- `psk_id`: string
-- `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
-- `used`: boolean - `true` once a server has authenticated a session with this record's PSK
-
-Possible outcomes: `ok`, `permission_denied`.
-
-#### Server → Client: `management/add-record`
-
-Add a pairing record directly.
-
-- `psk`: string - 43-character base64url-encoded 32-byte [long-term PSK](#definitions) (no padding)
-- `server_id?`: string - present for stored-pubkey records, absent for shared-PSK records
-
-A `psk` whose `psk_id` is already known, whether as a record or as the Sentinel PSK or the client's pairing PSK (see [Pre-Shared Key](#pre-shared-key)), is rejected as `already_exists`.
-
-Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
-
-#### Server → Client: `management/remove-record`
-
-Remove a pairing record.
-
-- `psk_id`: string
-
-Removing the requester's own record closes the management session with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'` after the response.
-
-A record that is still referenced by a `record_mode.psk_id` (see [Record mode](#record-mode)) cannot be removed.
-
-Possible outcomes: `ok`, `permission_denied`, `invalid`, `not_found`.
-
-### Pairing Config
-
-Commands for inspecting and modifying the client's pairing configuration.
-
-#### Server → Client: `management/get-pairing-config`
-
-No payload fields.
-
-On success, `data` is shaped as:
-
-- `pairing_psk`: object
-  - `enabled`: boolean
-  - `descriptor`: object
-- `static_pairing_code?`: object
-  - `enabled`: boolean
-  - `descriptor`: object
-- `dynamic_pairing_code?`: object
-  - `enabled`: boolean
-  - `escalated`: boolean - `true` when the method is [escalated](#failure-counter) to gesture-gating by its failure counter
-  - `descriptor`: object
-- `record_mode`: object - see [Record mode](#record-mode)
-- `unpaired_access`: object - see [Unpaired Access](#unpaired-access)
-  - `enabled`: boolean
-
-A pairing-code method object is absent if the client does not implement that method. Each `descriptor` is the method's [pair-method descriptor](#client--server-clienthello-pair-method-descriptor) as it would appear in `client/hello` were the method enabled.
-
-Configured secrets (the pairing PSK and the static pairing code) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
-
-Possible outcomes: `ok`, `permission_denied`.
-
-#### Server → Client: `management/set-pairing-config`
-
-Modify pairing config.
-
-- `pairing_psk?`: object
-  - `enabled?`: boolean
-  - `psk?`: string - 43-character base64url-encoded 32-byte PSK (no padding); replaces the configured pairing PSK
-- `static_pairing_code?`: object
-  - `enabled?`: boolean
-  - `code?`: string - 8 decimal digits; replaces the configured static pairing code
-- `dynamic_pairing_code?`: object
-  - `enabled?`: boolean
-- `record_mode?`: object - see [Record mode](#record-mode)
-- `unpaired_access?`: object - see [Unpaired Access](#unpaired-access)
-  - `enabled?`: boolean
-
-The request applies as a patch: only fields present in the payload are written, and any absent field (including an absent method object) leaves the corresponding stored value unchanged. Fields set on a method the client does not implement are rejected as `invalid`. Enabling `static_pairing_code` with no static pairing code configured and none supplied in the same request is likewise rejected as `invalid`. A `pairing_psk.psk` whose `psk_id` collides with a candidate PSK in a different category (the Sentinel PSK or a stored record; see [Pre-Shared Key](#pre-shared-key)) is rejected as `already_exists`.
-
-Possible outcomes: `ok`, `permission_denied`, `already_exists`, `invalid`, `storage_exhausted`.
-
-#### Record mode
-
-When a server completes pairing via any method, the resulting record is created according to the client's `record_mode`, a setting configured via [`management/set-pairing-config`](#server--client-managementset-pairing-config).
-
-`record_mode?`: object
-- `psk_id`: string - the shared-PSK record used as the storage-exhaustion fallback.
-
-The client creates a stored-pubkey record bound to the server, holding a freshly generated [long-term PSK](#definitions). If storage is exhausted, it instead admits the server under the shared-PSK record at `psk_id`, which becomes that server's long-term PSK.
-
-`psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
-
-The pre-provisioned record's PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices.
-
-### Server → Client: `management/open-pairing-window`
-
-Opens a [pairing window](#pairing-window) in place of the operator gesture.
-
-No payload fields.
-
-A no-op `ok` when a window is already open; rejected as `invalid` when no pairing-code method is enabled.
-
-Possible outcomes: `ok`, `permission_denied`, `invalid`.
-
-### Client → Server: `management/result`
-
-Response to a `management/*` request. The at-most-one-in-flight rule (see [Management](#management)) lets the server match each reply to its request by ordering alone, so no request-identifier field is carried.
-
-- `result`: string - result code. See each request's outcomes line for the subset that applies.
-  - `ok` - operation completed and any state change has been persisted
-  - `permission_denied` - the request was issued outside a valid management session
-  - `already_exists` - the request conflicts with an existing entry on the client
-  - `invalid` - the request payload is malformed, contains an out-of-range value, omits a field required for the chosen operation, or violates a referential constraint
-  - `not_found` - the request targets an identifier (e.g., `psk_id`) that does not exist on the client
-  - `storage_exhausted` - the client cannot persist the change due to full storage
-- `data?`: object - operation-specific response payload. Present only when the in-flight request defines one and `result` is `ok`; see each request for the shape.
-- `storage?`: object - storage accounting; a client that tracks bounded storage includes it on every result except `permission_denied`. See [Storage accounting](#storage-accounting).
-
-#### Storage accounting
-
-Records (and, on some clients, operator-set pairing secrets) share one storage pool. A client that can bound this pool reports it in the `storage` key, letting a server show remaining capacity and predict which operations will succeed; a client whose storage is effectively unbounded or of unknown size omits the key, and the server relies on `storage_exhausted` alone.
-
-- `free`: integer - currently free space.
-- `capacity`: integer - total pool size.
-- `cost_individual`: integer - what a new stored-pubkey record consumes.
-- `cost_shared`: integer - what a new shared-PSK record consumes.
-
-All four use one client-chosen unit (bytes, slots, ...), treated as opaque - a server uses only ratios and quotients, e.g. `(capacity - free) / capacity` or `free / cost_individual`. A record of a given kind can persist when `free` is at least that kind's cost; `storage_exhausted` however stays authoritative.
-
-A secret set via [`set-pairing-config`](#server--client-managementset-pairing-config) may also draw on the pool but isn't covered by these costs.
-
-The object always carries `free`; `capacity` and the costs appear additionally on [`list-records`](#server--client-managementlist-records) and [`get-pairing-config`](#server--client-managementget-pairing-config) results.
 
 ## Player messages
 This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.

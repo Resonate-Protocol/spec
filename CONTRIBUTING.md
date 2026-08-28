@@ -7,7 +7,7 @@ directly. Edit the source files and rebuild:
 
 - `template.md` - the document head (title, protocol overview, definitions,
   role versioning) plus the assembly order
-- `connection.md`, `messaging.md`, `pairing.md`, `management.md`
+- `connection.md`, `messaging.md`, `pairing.md`
 - `roles/<role>/<version>.md` - one file per role version
 
 `template.md` is the assembly root. It holds the head of the page and then
