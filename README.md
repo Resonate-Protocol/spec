@@ -1616,7 +1616,7 @@ This section describes messages specific to clients with the `metadata` role, wh
 The `metadata` object in [`server/state`](#server--client-serverstate) has this structure:
 
 - `metadata`: object
-  - `timestamp`: integer - server clock time in microseconds at which this metadata takes effect. A past or present timestamp describes the currently playing audio and anchors [progress extrapolation](#calculating-current-track-position); a future timestamp schedules the update (see [Scheduled metadata updates](#scheduled-metadata-updates))
+  - `timestamp`: integer - server clock time in microseconds at which this metadata takes effect, and the point [progress extrapolation](#calculating-current-track-position) runs from. A past or present timestamp describes the currently playing audio; a future timestamp schedules the update (see [Scheduled metadata updates](#scheduled-metadata-updates))
   - `title?`: string - track title
   - `artist?`: string - primary artist(s)
   - `album_artist?`: string - album artist(s)
