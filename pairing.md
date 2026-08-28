@@ -300,19 +300,26 @@ A condition during pairing that no conformant peer produces - a malformed or mis
 
 ### Client → Server: `client/hello` pair-method descriptor
 
-Each entry in `supported_pair_methods` in [`client/hello`](messaging.md#client--server-clienthello) is a descriptor object that names the pairing method and advertises the kind of operator interaction the client expects so the server can render appropriate UX.
+`supported_pair_methods` in [`client/hello`](messaging.md#client--server-clienthello) is an object keyed by pairing method identifier. Each value is a descriptor object that advertises the kind of operator interaction the client expects so the server can render appropriate UX.
 
-- `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - the pairing method identifier.
-- `out_channels?`: ('display' | 'speaker')[] - the channels through which the per-session pairing code is conveyed to the operator. Required on `dynamic_pairing_code` descriptors, absent on others.
-- `formats?`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Required on `dynamic_pairing_code` descriptors, absent on others. Non-empty; `qr_code` requires a display able to render a QR code.
-- `digit_audio?`: object - the server-supplied [digit audio pack](#dynamic-pairing-code-flow) the client wants. Required on `dynamic_pairing_code` descriptors whose `out_channels` include `'speaker'`; absent otherwise.
-  - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
-  - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
-  - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
-  - `max_bytes`: integer - maximum total encoded size of the ten clips in bytes
-- `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. A printed pairing PSK MUST be rendered as a QR code of its [pairing token](#pairing-token). When the secret is rotated, the client updates the hint accordingly.
+- `pairing_psk?`: object
+  - `locations?`: ('device' | 'leaflet' | 'operator')[]
+- `static_pairing_code?`: object
+  - `locations?`: ('device' | 'leaflet' | 'operator')[]
+- `dynamic_pairing_code?`: object
+  - `out_channels`: ('display' | 'speaker')[] - the channels through which the per-session pairing code is conveyed to the operator.
+  - `formats`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Non-empty; `qr_code` requires a display able to render a QR code.
+  - `digit_audio?`: object - the server-supplied [digit audio pack](#dynamic-pairing-code-flow) the client wants. Required when `out_channels` includes `'speaker'`, absent otherwise.
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
+    - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
+    - `max_bytes`: integer - maximum total encoded size of the ten clips in bytes
 
-A server MUST ignore a descriptor whose `method` it does not recognize - leaving its other fields unvalidated - and select only among the rest. On a `dynamic_pairing_code` descriptor it likewise ignores unrecognized `formats` and `out_channels` entries, treating a descriptor left with none of either as unrecognized; an unrecognized `digit_audio.codec` is treated as `'speaker'` being absent. Unrecognized `locations` values are ignored. Identifiers not defined here are reserved for future revisions of this specification. As with [unimplemented roles](README.md#detecting-outdated-servers), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
+`locations` is an informational hint listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. A printed pairing PSK MUST be rendered as a QR code of its [pairing token](#pairing-token). When the secret is rotated, the client updates the hint accordingly.
+
+A server MUST ignore a key it does not recognize - leaving its value unvalidated - and select only among the rest. It MUST likewise ignore unrecognized `formats`, `out_channels`, and `locations` values, treating a `dynamic_pairing_code` left with no recognized format or no recognized channel as an unrecognized key; an unrecognized `digit_audio.codec` is treated as `'speaker'` being absent. Identifiers not defined here are reserved for future revisions of this specification. As with [unimplemented roles](README.md#detecting-outdated-servers), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
+
+The same descriptors are reported for every implemented method, enabled or not, by [`management/get-pairing-config`](management.md#server--client-managementget-pairing-config).
 
 ### Messages
 

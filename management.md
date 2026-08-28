@@ -62,16 +62,19 @@ On success, `data` is shaped as:
 
 - `pairing_psk`: object
   - `enabled`: boolean
+  - `descriptor`: object
 - `static_pairing_code?`: object
   - `enabled`: boolean
+  - `descriptor`: object
 - `dynamic_pairing_code?`: object
   - `enabled`: boolean
   - `escalated`: boolean - `true` when the method is [escalated](pairing.md#failure-counter) to gesture-gating by its failure counter
+  - `descriptor`: object
 - `record_mode`: object - see [Record mode](#record-mode)
 - `unpaired_access`: object - see [Unpaired Access](pairing.md#unpaired-access)
   - `enabled`: boolean
 
-A pairing-code method object is absent if the client does not implement that method.
+A pairing-code method object is absent if the client does not implement that method. Each `descriptor` is the method's [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor) as it would appear in `client/hello` were the method enabled.
 
 Configured secrets (the pairing PSK and the static pairing code) are not returned; use [`management/set-pairing-config`](#server--client-managementset-pairing-config) to rotate them.
 
