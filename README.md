@@ -741,7 +741,7 @@ The client reveals the new long-term PSK only after `server_kc` verifies, and on
 
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
-Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code` - but SHOULD implement `static_pairing_code` too, shipped disabled with no pairing code provisioned. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
+Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
 Whether an implemented method is enabled is local client configuration, changed only through a manufacturer-defined action; there is no remote toggle. A disabled method is omitted from [`supported_pair_methods`](#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](#pre-shared-key)).
 
