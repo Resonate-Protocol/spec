@@ -492,12 +492,11 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
-  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code, and - for a client whose descriptor carries `digit_audio` - `digits` only when it can produce one of its `formats` within its `max_bytes`.
+  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code, and - for a client whose descriptor carries `digit_audio` - `digits` only when it can produce one of its `digit_audio.formats` within its `digit_audio.max_bytes`.
   - `digit_audio?`: object - announces server-supplied [digit audio](#dynamic-pairing-code-flow) clips for this attempt, in one of the `digit_audio.formats` from the client's descriptor. Required when `format` is `'digits'` and the client's descriptor carries `digit_audio`; absent otherwise.
     - `codec`: 'opus' | 'flac' | 'pcm'
     - `sample_rate`: integer - sample rate in Hz
     - `bit_depth`: integer - bit depth; ignored for `opus`
-    - `codec_header?`: string - codec header encoded as standard Base64 ([RFC 4648 section 4](https://www.rfc-editor.org/rfc/rfc4648#section-4), padding included). Required for `flac`, absent otherwise
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](#encryption):
 
@@ -759,7 +758,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure and does not touch the [failure counter](#failure-counter). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
 
 ### Unpaired Access
 
@@ -874,7 +873,7 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pairing-code-d
 
 **Digits emission.** A client that displays the pairing code follows [Pairing Code Presentation](#pairing-code-presentation). A client that speaks it reads single digits in the [presentation groups](#pairing-code-presentation); it SHOULD leave a short gap between digits and a longer one between groups. The digits themselves come from a **digit audio pack** supplied by the server: ten mono clips, one recording of each decimal digit `0`-`9`, trimmed to the spoken digit, in a language of the server's choosing.
 
-**Digit audio pack.** A speaker client advertises the pack it wants as `digit_audio` in its [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) - the `formats` it accepts, in descending preference, and `max_bytes`, the largest encoded pack size it accepts. The server picks the highest-priority format it can produce within `max_bytes` - servers MUST support all three codecs - and announces it as `digit_audio` in the pairing [`server/activate`](#server--client-serveractivate). After [`client/pair-init`](#client--server-clientpair-init) it delivers the clips as [digit audio clip](#server--client-digit-audio-clip-binary) messages in ascending digit order, each at most 2 seconds of audio and together at most `max_bytes` encoded. [`server/pair-init`](#server--client-serverpair-init) then completes the pack. The client emits by playing the clip for each code digit in turn. The pack is presentation-only - clips never enter the derivation or `PRS` - and is discarded when the attempt ends. A `digit_audio` naming a format the client did not advertise, a clip over 2 seconds, a pack over `max_bytes`, a clip undecodable or whose embedded stream parameters contradict the announced format, or a pack still incomplete when `server/pair-init` arrives is a [protocol error](#protocol-errors).
+**Digit audio pack.** A speaker client advertises the pack it wants as `digit_audio` in its [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) - the `formats` it accepts, in descending preference, and `max_bytes`, the largest encoded pack size it accepts. The server picks the highest-priority format it can produce within `max_bytes` - servers MUST support all three codecs - and announces it as `digit_audio` in the pairing [`server/activate`](#server--client-serveractivate). After [`client/pair-init`](#client--server-clientpair-init) it delivers the clips as [digit audio clip](#server--client-digit-audio-clip-binary) messages in ascending digit order, each at most 2 seconds of audio and together at most `max_bytes` encoded. [`server/pair-init`](#server--client-serverpair-init) then completes the pack. The client emits by playing the clip for each code digit in turn. The pack is presentation-only - clips never enter the derivation or `PRS` - and is discarded when the attempt ends. The client verifies each clip as it arrives, before any is played. A `digit_audio` naming a format the client did not advertise, a clip over 2 seconds, a pack over `max_bytes`, a clip undecodable or whose embedded stream parameters contradict the announced format, or a pack still incomplete when `server/pair-init` arrives is a [protocol error](#protocol-errors).
 
 In initial pairing the pack comes from an unauthenticated peer, which thereby chooses what the client's speaker plays. The clip constraints keep each clip short, and the peer, unable to predict the code, cannot choose which clips play or in what order, so they cannot be strung into a longer message.
 
@@ -903,7 +902,7 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 Brute-force protection for the Dynamic Pairing Code Flow is built around a failure counter that escalates the method to gesture-gating (see [Pairing Window](#pairing-window)). The following rules are mandatory for clients implementing `dynamic_pairing_code`:
 
 - **Counter.** The client maintains a single failure counter for the method, persisted across reboots. It is not partitioned by `server_id` or source IP.
-- **Increment.** The counter increments on each inner-authentication failure the client itself detects: its own verification of `server_kc` fails. No other event increments it.
+- **Increment.** The counter increments when the client starts emitting the pairing code, at most once per attempt. No other event increments it.
 - **Reset.** The counter resets to zero when the client's verification of `server_kc` succeeds, whether or not the attempt finalizes.
 - **Escalation.** When the counter reaches **5**, the method is **escalated**: every subsequent attempt is gesture-gated until a reset de-escalates it. Escalation is not an error state - the method stays offered.
 
@@ -1034,7 +1033,7 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
 - `out_channels?`: ('display' | 'speaker')[] - the channels through which the per-session pairing code is conveyed to the operator. Required on `dynamic_pairing_code` descriptors, absent on others.
 - `formats?`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Required on `dynamic_pairing_code` descriptors, absent on others. Non-empty; `qr_code` requires a display able to render a QR code.
 - `digit_audio?`: object - the server-supplied [digit audio pack](#dynamic-pairing-code-flow) the client wants. Required on `dynamic_pairing_code` descriptors whose `out_channels` include `'speaker'`; absent otherwise.
-  - `formats`: object[] - formats the client accepts, in descending preference
+  - `formats`: object[] - formats the client accepts, in descending preference. Non-empty.
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
     - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
@@ -1135,9 +1134,9 @@ Sent only in an attempt whose [`server/activate`](#server--client-serveractivate
 
 **Clip contents:** Each clip carries one whole spoken digit - mono, at most 2 seconds - in the format announced in [`server/activate`](#server--client-serveractivate); a clip whose embedded stream parameters contradict it - a FLAC STREAMINFO with other channels, sample rate, or bit depth, an OpusHead with other channels - is malformed. Per codec:
 
-- `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample. `codec_header` is absent.
-- `flac`: one or more complete FLAC frames. `codec_header` is required and carries the `fLaC` stream marker followed by the STREAMINFO metadata block.
-- `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream. `codec_header` is absent; the decoder outputs at the announced `sample_rate`.
+- `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample.
+- `flac`: a complete FLAC stream - `fLaC` marker, STREAMINFO block, frames.
+- `opus`: an [Ogg Opus](https://www.rfc-editor.org/rfc/rfc7845) stream; the decoder outputs at the announced `sample_rate`.
 
 ## Management
 
