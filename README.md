@@ -275,7 +275,7 @@ The session proceeds as an ordinary Sentinel connection at [trust level](#defini
 
 ### Locked-Down Clients
 
-A client is **locked down** when it admits no [unpaired access](#unpaired-access) and offers no pairing method (every implemented method [disabled](#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](#server--client-serverhello) with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_unavailable'` in place of [`client/hello`](#client--server-clienthello) and closes.
+A client is **locked down** when it admits no [unpaired access](#unpaired-access) and offers no pairing method (every implemented method [disabled](#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](#server--client-serverhello) with [`client/goodbye`](#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](#client--server-clienthello) and closes.
 
 ### Prologue
 
@@ -448,7 +448,7 @@ The same `noise/handshake` message is used for the in-band [re-handshake](#re-ha
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`). This message will be followed by a [`client/hello`](#client--server-clienthello) message from the client.
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`).
 
 - `name`: string - friendly name of the server
 
@@ -705,14 +705,14 @@ Sent by the client before gracefully closing the connection. This allows the cli
 
 Upon receiving this message, the server should initiate the disconnect.
 
-- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'pairing_unavailable' | 'concurrent_attempt' | 'unpaired'
+- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'locked_down' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
   - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
   - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` without `'user'` [trust level](#definitions)), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
-  - `pairing_unavailable` - the client is [locked down](#locked-down-clients), so an unpaired server can neither use nor pair it. Sent in place of [`client/hello`](#client--server-clienthello). Server should not auto-reconnect
+  - `locked_down` - the client is [locked down](#locked-down-clients), so an unpaired server can neither use nor pair it. Sent in place of [`client/hello`](#client--server-clienthello). Server should not auto-reconnect
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
@@ -1026,7 +1026,7 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
 - `formats?`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Required on `dynamic_pairing_code` descriptors, absent on others. Non-empty; `qr_code` requires a display able to render a QR code.
 - `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. A printed pairing PSK MUST be rendered as a QR code of its [pairing token](#pairing-token). When the secret is rotated, the client updates the hint accordingly.
 
-A server MUST ignore a descriptor whose `method` it does not recognize - leaving its other fields unvalidated - and select only among the rest. On a `dynamic_pairing_code` descriptor it likewise ignores unrecognized `formats` entries, treating a descriptor left with none as unrecognized; unrecognized `out_channels` and `locations` values are ignored. Identifiers not defined here are reserved for future revisions of this specification. As with [roles](#role-versioning), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
+A server MUST ignore a descriptor whose `method` it does not recognize - leaving its other fields unvalidated - and select only among the rest. On a `dynamic_pairing_code` descriptor it likewise ignores unrecognized `formats` entries, treating a descriptor left with none as unrecognized; unrecognized `out_channels` and `locations` values are ignored. Identifiers not defined here are reserved for future revisions of this specification. As with [unimplemented roles](#detecting-outdated-servers), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
 
 ### Messages
 

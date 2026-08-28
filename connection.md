@@ -135,7 +135,7 @@ The session proceeds as an ordinary Sentinel connection at [trust level](README.
 
 ### Locked-Down Clients
 
-A client is **locked down** when it admits no [unpaired access](pairing.md#unpaired-access) and offers no pairing method (every implemented method [disabled](management.md#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](messaging.md#server--client-serverhello) with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'pairing_unavailable'` in place of [`client/hello`](messaging.md#client--server-clienthello) and closes.
+A client is **locked down** when it admits no [unpaired access](pairing.md#unpaired-access) and offers no pairing method (every implemented method [disabled](management.md#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](messaging.md#server--client-serverhello) with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](messaging.md#client--server-clienthello) and closes.
 
 ### Prologue
 
