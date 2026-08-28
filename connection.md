@@ -127,10 +127,6 @@ The server verifies the second handshake message against the PSK its first messa
 
 The session proceeds as an ordinary [unpaired](README.md#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
-### Locked-Down Clients
-
-A client is **locked down** when it admits no [unpaired access](pairing.md#unpaired-access) and offers no pairing method (every implemented method [disabled](pairing.md#pairing)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](messaging.md#server--client-serverhello) with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](messaging.md#client--server-clienthello) and closes.
-
 ### Prologue
 
 The prologue mixed into the Noise handshake state on both sides is the concatenation of the exact bytes of [`client/init`](messaging.md#client--server-clientinit) followed by the exact bytes of [`server/init`](messaging.md#server--client-serverinit), as transmitted on the wire (the JSON-encoded UTF-8 message body, without the WebSocket framing). This binds the cleartext init exchange to the handshake; tampering causes the handshake to fail.
