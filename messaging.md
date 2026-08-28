@@ -404,7 +404,7 @@ Client behavior:
 
 - Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
 - If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](management.md#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](management.md#server--client-managementremove-record).
-- If the session is [unpaired](README.md#definitions), there is no record to remove (e.g., an in-flight pairing handshake keyed by the pairing PSK), so ignore the message and continue unchanged.
+- If the session is [unpaired](README.md#definitions), there is no record to remove, so ignore the message and continue unchanged.
 
 ### Client → Server: `client/goodbye`
 
