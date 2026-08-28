@@ -1,6 +1,6 @@
 ## Management
 
-This section covers the management commands a paired (`user`-trust) server may issue.
+This section covers the management commands a paired server may issue.
 
 Management commands are scoped to connections with `'management'` in their [`activities`](messaging.md#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [long-term PSK](README.md#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
 
@@ -8,7 +8,7 @@ All `management/*` requests are answered by a single [`management/result`](#clie
 
 ### Records
 
-Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](README.md#definitions); every record carries `user` [trust level](README.md#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](README.md#definitions), so any session it authenticates is [paired](README.md#definitions). Records come in two kinds:
 
 - **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
