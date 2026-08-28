@@ -308,7 +308,7 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged. For the `metadata` and `color` objects, a future `timestamp` defers when the state takes effect (see scheduled updates for [`metadata`](roles/metadata/v1.md#scheduled-metadata-updates) and [`color`](roles/color/v1.md#scheduled-color-updates)).
+Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged and any pending scheduled update in place. For the `metadata` and `color` objects, a future `timestamp` defers when the state takes effect (see scheduled updates for [`metadata`](roles/metadata/v1.md#scheduled-metadata-updates) and [`color`](roles/color/v1.md#scheduled-color-updates)).
 
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
