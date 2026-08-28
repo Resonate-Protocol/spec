@@ -202,11 +202,7 @@ Only after receiving the initial `server/activate` should the client send any ot
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
 - `pairing?`: object - parameters of the pairing attempt this activation admits. Required when `'pairing'` is in `activities`; absent otherwise. A client ignores this field when `activities` does not include `'pairing'`.
   - `method`: 'dynamic_pairing_code' | 'pairing_psk' | 'static_pairing_code' - pairing method the server picked, drawn from the client's `supported_pair_methods`.
-  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](pairing.md#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code, and - for a client whose descriptor carries `digit_audio` - `digits` only when it can produce one of its `digit_audio.formats` within its `digit_audio.max_bytes`.
-  - `digit_audio?`: object - announces server-supplied [digit audio](pairing.md#dynamic-pairing-code-flow) clips for this attempt, in one of the `digit_audio.formats` from the client's descriptor. Required when `format` is `'digits'` and the client's descriptor carries `digit_audio`; absent otherwise.
-    - `codec`: 'opus' | 'flac' | 'pcm'
-    - `sample_rate`: integer - sample rate in Hz
-    - `bit_depth`: integer - bit depth; ignored for `opus`
+  - `format?`: 'digits' | 'qr_code' - the dynamic [emission format](pairing.md#dynamic-pairing-code-flow), drawn from the client's `dynamic_pairing_code` descriptor. Required when `method` is `'dynamic_pairing_code'`; absent otherwise. The server selects `qr_code` only when its operator interface can scan a QR code, and - for a client whose descriptor carries `digit_audio` - `digits` only when it can fit the digit audio pack, in the format of the client's `digit_audio`, within its `max_bytes`.
 
 The activity sets the server may legitimately declare are constrained by which PSK matched during the [Noise handshake](connection.md#encryption):
 

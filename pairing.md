@@ -108,7 +108,7 @@ sequenceDiagram
         Note over Client: Operator opens pairing window
     end
     Client->>Server: client/pair-init (commit_B)
-    opt digit_audio announced
+    opt digits attempt, speaker client
         Server->>Client: digit audio clip (binary), one per digit 0-9
     end
     Server->>Client: server/pair-init (nonce_A)
@@ -146,7 +146,7 @@ The hash input is the UTF-8 bytes of the literal label `"sendspin-pairing-code-d
 
 **Digits emission.** A client that displays the pairing code follows [Pairing Code Presentation](#pairing-code-presentation). A client that speaks it reads single digits in the [presentation groups](#pairing-code-presentation); it SHOULD leave a short gap between digits and a longer one between groups. The digits themselves come from a **digit audio pack** supplied by the server: ten mono clips, one recording of each decimal digit `0`-`9`, trimmed to the spoken digit, in a language of the server's choosing.
 
-**Digit audio pack.** A speaker client advertises the pack it wants as `digit_audio` in its [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) - the `formats` it accepts, in descending preference, and `max_bytes`, the largest encoded pack size it accepts. The server picks the highest-priority format it can produce within `max_bytes` - servers MUST support all three codecs - and announces it as `digit_audio` in the pairing [`server/activate`](messaging.md#server--client-serveractivate). After [`client/pair-init`](#client--server-clientpair-init) it delivers the clips as [digit audio clip](#server--client-digit-audio-clip-binary) messages in ascending digit order, each at most 2 seconds of audio and together at most `max_bytes` encoded. [`server/pair-init`](#server--client-serverpair-init) then completes the pack. The client emits by playing the clip for each code digit in turn. The pack is presentation-only - clips never enter the derivation or `PRS` - and is discarded when the attempt ends. The client verifies each clip as it arrives, before any is played. A `digit_audio` naming a format the client did not advertise, a clip over 2 seconds, a pack over `max_bytes`, a clip undecodable or whose embedded stream parameters contradict the announced format, or a pack still incomplete when `server/pair-init` arrives is a [protocol error](#protocol-errors).
+**Digit audio pack.** A speaker client advertises the pack it wants as `digit_audio` in its [`dynamic_pairing_code` descriptor](#client--server-clienthello-pair-method-descriptor) - the format it accepts and `max_bytes`, the largest encoded pack size it accepts. Servers MUST be able to supply the pack in any such format: all three codecs, at any sample rate and bit depth. In a `digits` attempt, after [`client/pair-init`](#client--server-clientpair-init) the server delivers the clips as [digit audio clip](#server--client-digit-audio-clip-binary) messages in ascending digit order, each at most 2 seconds of audio and together at most `max_bytes` encoded. [`server/pair-init`](#server--client-serverpair-init) then completes the pack. The client emits by playing the clip for each code digit in turn. The pack is presentation-only - clips never enter the derivation or `PRS` - and is discarded when the attempt ends. The client verifies each clip as it arrives, before any is played. A clip over 2 seconds, a pack over `max_bytes`, a clip undecodable or whose embedded stream parameters contradict the client's format, or a pack still incomplete when `server/pair-init` arrives is a [protocol error](#protocol-errors).
 
 In initial pairing the pack comes from an unauthenticated peer, which thereby chooses what the client's speaker plays. The clip constraints keep each clip short, and the peer, unable to predict the code, cannot choose which clips play or in what order, so they cannot be strung into a longer message.
 
@@ -306,10 +306,9 @@ Each entry in `supported_pair_methods` in [`client/hello`](messaging.md#client--
 - `out_channels?`: ('display' | 'speaker')[] - the channels through which the per-session pairing code is conveyed to the operator. Required on `dynamic_pairing_code` descriptors, absent on others.
 - `formats?`: ('digits' | 'qr_code')[] - the [emission formats](#dynamic-pairing-code-flow) the client offers. Required on `dynamic_pairing_code` descriptors, absent on others. Non-empty; `qr_code` requires a display able to render a QR code.
 - `digit_audio?`: object - the server-supplied [digit audio pack](#dynamic-pairing-code-flow) the client wants. Required on `dynamic_pairing_code` descriptors whose `out_channels` include `'speaker'`; absent otherwise.
-  - `formats`: object[] - formats the client accepts, in descending preference. Non-empty.
-    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
-    - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
-    - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
+  - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+  - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
+  - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `max_bytes`: integer - maximum total encoded size of the ten clips in bytes
 - `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. When the secret is rotated, the client updates the hint accordingly.
 
@@ -340,7 +339,7 @@ Server's nonce contribution in the [Dynamic Pairing Code Flow](#dynamic-pairing-
 
 - `nonce_A`: string - 32 bytes from a CSPRNG, base64url-encoded (43 chars). See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)
 
-When the activation announced `digit_audio`, this message follows the ten [digit audio clips](#server--client-digit-audio-clip-binary) and completes the pack. Upon receipt, the client derives and emits the pairing code; the operator then types or scans it into the server.
+In a `digits` attempt with a speaker client, this message follows the ten [digit audio clips](#server--client-digit-audio-clip-binary) and completes the pack. Upon receipt, the client derives and emits the pairing code; the operator then types or scans it into the server.
 
 #### Server → Client: `server/pair-auth`
 
@@ -399,13 +398,13 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 One clip of a [digit audio pack](#dynamic-pairing-code-flow).
 
-Sent only in an attempt whose [`server/activate`](messaging.md#server--client-serveractivate) announced `digit_audio`, after [`client/pair-init`](#client--server-clientpair-init) and before [`server/pair-init`](#server--client-serverpair-init): ten messages in ascending digit order, together at most the descriptor's [`max_bytes`](#client--server-clienthello-pair-method-descriptor). A clip outside that window, out of order, duplicated, or with a digit above 9 is a [sequence violation](#messages).
+Sent only in a `digits` attempt with a speaker client, after [`client/pair-init`](#client--server-clientpair-init) and before [`server/pair-init`](#server--client-serverpair-init): ten messages in ascending digit order, together at most the descriptor's [`max_bytes`](#client--server-clienthello-pair-method-descriptor). A clip outside that window, out of order, duplicated, or with a digit above 9 is a [sequence violation](#messages).
 
 - Byte 0: message type `2` (uint8)
 - Byte 1: digit (uint8) - the decimal digit `0`-`9` the clip speaks
-- Rest of bytes: the clip in the announced format
+- Rest of bytes: the clip in the client's format
 
-**Clip contents:** Each clip carries one whole spoken digit - mono, at most 2 seconds - in the format announced in [`server/activate`](messaging.md#server--client-serveractivate); a clip whose embedded stream parameters contradict it - a FLAC STREAMINFO with other channels, sample rate, or bit depth, an OpusHead with other channels - is malformed. Per codec:
+**Clip contents:** Each clip carries one whole spoken digit - mono, at most 2 seconds - in the format of the client's descriptor [`digit_audio`](#client--server-clienthello-pair-method-descriptor); a clip whose embedded stream parameters contradict it - a FLAC STREAMINFO with other channels, sample rate, or bit depth, an OpusHead with other channels - is malformed. Per codec:
 
 - `pcm`: samples encoded as little-endian signed integers (two's complement), 24-bit samples packed as 3 bytes per sample.
 - `flac`: a complete FLAC stream - `fLaC` marker, STREAMINFO block, frames.
