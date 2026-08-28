@@ -106,7 +106,8 @@ sequenceDiagram
 - **long-term PSK** - a 32-byte pre-shared symmetric secret established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server as a [pairing token](#pairing-token), copied as text or scanned as a QR code. Distinct from the long-term PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
 - **Pairing Code** - a value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit decimal value; the dynamic-pairing-code method uses a per-session generated value, emitted as a 6-digit decimal code or as a QR code (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
-- **Trust Level** - one of `user` or `none`, expressing the trust the client extends to the server. Ordered `none < user`. `user` means a pairing record exists for the server; `none` means none does, restricting the server to a pairing exchange or, when [unpaired access](#unpaired-access) is enabled, normal playback and control flows.
+- **Factory Reset** - returns a device to its manufactured state: credentials and settings the manufacturer provisioned (identity keypair, pairing PSK, static pairing code, a calibrated [output delay](#client--server-clientstate-player-object)) are restored; everything accumulated since, pairing records included, is cleared.
+- **Paired Session** - a session keyed by a long-term PSK, meaning the client holds a pairing record for the server. Sessions keyed by the pairing PSK or the Sentinel PSK are *unpaired*, which limits the server to a pairing exchange, or to normal playback and control flows where [unpaired access](#unpaired-access) is enabled. Neither side sends this on the wire: both derive it from the PSK that matched during the [Noise](#encryption) handshake.
 
 ## Role Versioning
 
@@ -209,7 +210,7 @@ Sendspin uses the `KKpsk2` Noise pattern. Both static keys are pre-known to both
 
 The **server is the Noise initiator**, the **client is the Noise responder**, regardless of which side initiated the WebSocket connection.
 
-**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions' transport traffic (the exception is the first handshake message's `psk_id` payload, recoverable with the client's static key). Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
+**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions' transport traffic (the exception is the first handshake message's payload, recoverable with the client's static key). Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
 
 ### Cipher Suites
 
@@ -232,15 +233,15 @@ The `client_id` and `server_id` fields are the base64url-encoded (no padding) Cu
 
 The PSK is mixed into the handshake state at the end of the second handshake message (the `psk2` modifier). The transport-mode keys derived after the handshake therefore include the PSK, but the first handshake message's payload (sent by the server) is encrypted without the PSK mixed in.
 
-To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
+To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` and a `psk_category` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
 
 ```
 psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 ```
 
-The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category. `psk_category` declares which category the server is using the referenced PSK as - `'lt'` (long-term), `'pr'` (pairing), or `'sn'` (Sentinel) - so a match binds both sides to the same category, which determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
-The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would make a single wire `psk_id` map to two trust levels. Clients enforce this when records are configured (see [Management](#records)).
+The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would mean the same bytes serve as a PSK in both, exposing the stronger credential through the weaker channel (the [pairing token](#pairing-token) distributes the pairing PSK in cleartext, and the Sentinel PSK is public). Clients enforce this when records are configured (see [Management](#records)).
 
 The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
 
@@ -256,12 +257,20 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
                 = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
 ```
 
-The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the handshake fails. A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is excluded from the candidate set, so a handshake referencing it fails as a lookup miss.
+The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
 
 Two storage variants are supported for [long-term PSK](#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
 
 - **Stored-pubkey model**: each long-term PSK is persisted alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
 - **Shared-PSK model**: PSKs are persisted without an associated `server_id`; the `server_id` from [`server/init`](#server--client-serverinit) is accepted at face value. Convenient for storage-constrained clients, but with weaker security properties - multiple servers may share the same PSK.
+
+### Sentinel Fallback
+
+A `psk_id` lookup miss means the server referenced a credential the client cannot use: the client lost its pairing record (e.g., a [Factory Reset](#definitions) or storage failure), an interrupted [pairing finalize](#server--client-serverpair-finalize) left the client without the record the server persisted, the referenced PSK belongs to a disabled pairing method, or the client holds the referenced PSK under a different category than the declared `psk_category` (e.g., a removed record's PSK later configured as the pairing PSK). On a lookup miss in the initial handshake the client completes the second handshake message with the Sentinel PSK instead of failing. The fallback applies only there: a miss during a [re-handshake](#re-handshake), and a failed stored-pubkey post-match check (a misbinding, not a miss), fail the handshake as before.
+
+The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](#pairing) or [management](#records).
+
+The session proceeds as an ordinary [unpaired](#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
 ### Prologue
 
@@ -271,13 +280,13 @@ Both sides MUST hash the raw message bytes exactly as sent and received, not a r
 
 ### Failure Handling
 
-Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, `psk_id` lookup miss, Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
+Any handshake-phase failure - malformed cleartext message, unsupported `version`, unknown `suite`, handshake timeout, a `psk_id` lookup miss without the [Sentinel Fallback](#sentinel-fallback), Noise AEAD failure, or AEAD failure once in transport mode - closes the WebSocket without sending any application-level error message. Implementations SHOULD apply a timeout (e.g., 30 seconds) for each side to receive the next expected message during the prologue and Noise-handshake phases.
 
 ### Re-handshake
 
-The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the trust level after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
+The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) (the client re-asserts `trust_level`) → [`server/activate`](#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
 
 ## Communication
 
@@ -342,8 +351,8 @@ The first byte of every binary message is its message ID. IDs are assigned from 
 | IDs | Assignment |
 |---|---|
 | 0 | JSON message body (UTF-8) |
-| 1 | Reserved for future use |
-| 2-3 | [Fragmentation](#fragmentation) |
+| 1 | [Fragmentation](#fragmentation) |
+| 2-3 | Reserved for future use |
 | 4-7 | Player role |
 | 8-11 | Artwork role |
 | 12-15 | Source role |
@@ -357,32 +366,26 @@ Future roles will be allocated aligned blocks of 4 or 8 IDs from the reserved 24
 
 ### Fragmentation
 
-A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message types.
+A single Noise transport message is limited to 65535 bytes by the Noise specification. Both defined cipher suites use a 16-byte AEAD authentication tag, and the message type byte occupies the first byte of the AEAD plaintext, so the application payload per frame is at most 65535 − 16 − 1 = 65518 bytes. Larger messages must be split across multiple WebSocket binary frames using the fragment message type.
 
 **Wire format** (inside the AEAD-protected plaintext of each fragment frame):
 
-A fragmented message consists of an opening fragment-more frame (carrying `orig_type`), zero or more continuation fragment-more frames, and a closing fragment-end frame. The minimum is one fragment-more frame followed by one fragment-end frame.
+- First fragment: `[1][flags][orig_type][data]`
+- Subsequent fragments: `[1][flags][data]`
 
-Bit 0 is the last-fragment flag: `00000010` (2) is a fragment-more frame, `00000011` (3) is a fragment-end frame.
-
-- Fragment-more (type `2`):
-  - First fragment of a fragmented message: `[2][orig_type][data]`
-  - Subsequent non-final fragments: `[2][data]`
-- Fragment-end (type `3`): `[3][data]`
-
-The format of a type `2` frame depends on the receiver's state: when no fragmented message is in flight, a type `2` frame begins a new one and carries `orig_type`; when a fragmented message is already in flight, a type `2` frame is a continuation and carries only `data`.
+`flags` is a uint8. Bit 1 is set on the first fragment of a message and bit 0 on the last. Bits 2-7 are reserved and MUST be zero.
 
 The concatenated `data` from all fragments yields the original message's payload (the bytes that would have followed the message type byte in a non-fragmented message of type `orig_type`).
 
 **Constraints:**
 
-- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a fragment-end frame before sending any other frame in that direction, whether fragmented or not.
+- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other frame in that direction, whether fragmented or not.
 - Senders should not fragment messages that fit in a single non-fragmented frame.
-- A sender MUST NOT use a fragment type (`2` or `3`) as `orig_type`.
+- A sender MUST NOT use `1` as `orig_type`.
 
-**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a fragment-more frame when no message is in flight, read `orig_type` from byte 1, then start a new buffer with the rest of the frame. On a fragment-more frame when a message is in flight, append the frame's data to the buffer. On a fragment-end frame, append the frame's data and dispatch the result as a single message of type `orig_type`, then clear the buffer.
+**Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with the rest of the frame; on any other fragment, append the frame's data to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a fragment-end frame received with no fragmented message in flight, a non-fragment frame received while a fragmented message is in flight in the same direction, and an `orig_type` of `2` or `3`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
 
@@ -438,6 +441,7 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
 
 - **Noise message 1 payload** (server → client): 
   - `psk_id`: string - 43-character base64url-encoded SHA-256 hash derived from the PSK. Used by the client to select the PSK before processing message 2; the message-1 payload is decryptable without the PSK (see [Pre-Shared Key](#pre-shared-key)).
+  - `psk_category`: 'lt' | 'pr' | 'sn' - the category the server is using the referenced PSK as: long-term, pairing, or Sentinel. A `psk_id` the client holds only under a different category is a lookup miss (see [Pre-Shared Key](#pre-shared-key)). The codes share one length, so the encrypted payload's length is independent of the category.
 - **Noise message 2 payload** (client → server): the empty object as the literal two bytes `{}` (not a zero-length Noise payload)
 
 A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a handshake failure and closes the WebSocket (see [Failure Handling](#failure-handling)).
@@ -464,7 +468,6 @@ Players that can output audio should have the role `player`.
   - `manufacturer?`: string - device manufacturer name
   - `software_version?`: string - software version of the client (not the Sendspin version)
   - `mac_address?`: string - MAC address of the network interface the connection is opened on, in lowercase colon-separated form (e.g., `aa:bb:cc:dd:ee:ff`)
-- `trust_level`: 'user' | 'none' - the [trust level](#definitions) the client extends to this server, governing which operations the server may issue. `'user'` reflects a pairing record for this server; `'none'` is sent in [pairing](#pairing) handshakes and on [unpaired access](#unpaired-access), where no record exists for this server
 - `supported_roles`: string[] - versioned roles supported by the client (e.g., `player@v1`, `controller@v1`). Defined versioned roles are:
   - `player@v1` - outputs audio
   - `source@v1` - captures audio from a local input and streams it to the server
@@ -510,23 +513,21 @@ The activity sets the server may legitimately declare are constrained by which P
 
 `pairing.method` MUST be `'pairing_psk'` if and only if the matched PSK is the [pairing PSK](#definitions). It MUST also be a method the client listed in [`supported_pair_methods`](#client--server-clienthello).
 
-Per-role trust also bounds `active_roles`: `source@v1` MUST NOT be activated at [trust level](#definitions) `'none'` (see [Pairing required](#source-messages)); no other role carries a trust constraint.
-
 **Playback-capable connections.** A connection is *playback-capable* when its `activities` extended with `'playback'` are an allowed set for the matched PSK; a connection already declaring `'playback'` is therefore playback-capable exactly when its `activities` are an allowed set. Only a playback-capable connection MAY carry a non-empty `active_roles`, and it may do so even when `'playback'` is not currently in `activities`. The client re-evaluates this constraint on every `server/activate` against the persisted `active_roles`: if a later activation changes `activities` so the connection is no longer playback-capable without explicitly sending `active_roles`, the persisted roles are treated as empty rather than the message rejected.
 
 `server/activate` is *admissible* when it satisfies the constraints above. When one is not admissible, the client rejects it, selecting the response by the first rule that applies:
 
 - If the matched PSK is the [Sentinel PSK](#pre-shared-key), the client does not have [unpaired access](#unpaired-access) enabled, and enabling unpaired access would make the activation admissible - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'pairing_required'`.
-- If `activities` is not an allowed set for the matched PSK, `active_roles` is non-empty on a connection that is not playback-capable, or `active_roles` includes a role forbidden at the session's trust level (`source@v1` at `'none'`) - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
+- If `activities` is not an allowed set for the matched PSK, or `active_roles` is non-empty on a connection that is not playback-capable - close the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`.
 - If `'pairing'` is in `activities` with a `pairing.method` the matched PSK disallows or the client does not currently offer, or a `pairing.format` the client does not currently offer - reply with [`pair/abort`](#client--server-pairabort) reason `method_not_supported`, leaving the connection open. The check uses the live pairing configuration, which may have drifted from [`supported_pair_methods`](#client--server-clienthello); the server may re-activate, or [re-handshake](#re-handshake) for a fresh advertisement.
 
 **Worked example (`pairing_required` vs `unauthorized`).** A Sentinel-keyed connection to a client with unpaired access disabled receives `activities: ['playback']` and `active_roles: ['player@v1']`. Under a hypothetical `unpaired_access: enabled`, `['playback']` would be an allowed set for the Sentinel PSK and the connection would be playback-capable, so the activation would be admissible: the client closes with `'pairing_required'`. If the same connection instead received `activities: ['playback', 'management']`, no unpaired-access setting makes that set allowed on the Sentinel PSK, so the reason is `'unauthorized'`.
 
 Servers SHOULD declare the minimal set of activities that reflects the connection's current purpose, and drop an activity as soon as that purpose ends. Admission between competing connections is decided by the highest-ranked declared activity (see [Multiple servers](#multiple-servers-server-initiated)), so keeping an unused activity declared would degrade multi-server cooperation.
 
-Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on trust level, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
+Servers normally activate the client's [preferred](#priority-and-activation) version of each role, but MAY omit a role at their discretion (e.g., based on whether the session is paired, deployment context, or operator policy). Checking `active_roles` is therefore required to determine what the client may actually use on this session.
 
-**Note:** When a `server/activate` removes a role from `active_roles`, the server first ends that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
+When a `server/activate` removes a role from `active_roles`, the server MUST first end that role's output by sending [`stream/end`](#server--client-streamend) for stream roles (`player`, `artwork`, `visualizer`), or a [`server/state`](#server--client-serverstate) with a null role object for state roles (`metadata`, `color`, `controller`) - so the client never holds live data for an inactive role.
 
 ### Client → Server: `client/time`
 
@@ -549,11 +550,11 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send its full state.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send an update that includes that role's object.
 
 A client whose `active_roles` include `artwork` or `visualizer` sends the initial `client/state` even when none of its roles defines a state object; `available` alone unlocks the server's streams.
 
-The initial message MUST include all state fields. In subsequent messages, the client MAY send only the fields that have changed; the server MUST merge each update into existing state, retaining the last value of any field that is absent. A client MAY instead resend unchanged fields, up to its full state.
+Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
   - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
@@ -589,7 +590,7 @@ If the client is in a multi-client group:
 
 If the client is already in a solo group:
 - Stop playback and send [`stream/end`](#server--client-streamend) for all active streams
-- If `playback_state` was not already `'stopped'`, send [`group/update`](#server--client-groupupdate) with `playback_state: 'stopped'`
+- If `playback_state` was not already `'stopped'`, send [`group/update`](#server--client-groupupdate) reporting `playback_state: 'stopped'`
 
 When a client returns to `available: true`, the server MUST NOT auto-rejoin it to its previous group or restart playback; the client remains in the solo group and rejoins only via an explicit [`switch`](#switch-command-cycle).
 
@@ -605,13 +606,9 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Only include fields that have changed. The client will merge these updates into existing state. A leaf field set to `null` should be cleared from the client's state; a whole role object set to `null` clears all of that role's state.
+Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
-The merge is shallow: a nested object (e.g., `metadata.progress`) is replaced or cleared as a whole, never deep-merged, so nested objects are always sent complete.
-
-The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry the role's full state.
-
-The asymmetry with [`client/state`](#client--server-clientstate) is deliberate: server-to-client updates carry only changed fields; clients MAY resend unchanged fields.
+A role object set to `null` clears all of that role's state.
 
 - `metadata?`: object | null - only sent to clients with `metadata` role ([see metadata state object details](#server--client-serverstate-metadata-object))
 - `controller?`: object | null - only sent to clients with `controller` role ([see controller state object details](#server--client-serverstate-controller-object))
@@ -664,7 +661,7 @@ Response when a stream is active for the role: [`stream/start`](#server--client-
 
 Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
 
-**Note:** Clients should use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+**Note:** Clients can use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
@@ -684,13 +681,11 @@ Sending `stream/end` in these cases is explicitly prohibited because it signals 
 
 State update of the group this client is part of.
 
-Contains delta updates with only the changed fields. The client should merge these updates into existing state.
+Every message MUST carry the full group state.
 
-The first `group/update` on a connection MUST carry the full group state (all fields below), so the client has a baseline to merge later deltas into.
-
-- `playback_state?`: 'playing' | 'stopped' - playback state of the group
-- `group_id?`: string - group identifier
-- `group_name?`: string - friendly name of the group
+- `playback_state`: 'playing' | 'stopped' - playback state of the group
+- `group_id`: string - group identifier
+- `group_name`: string - friendly name of the group
 
 ### Server → Client: `server/unpair`
 
@@ -700,7 +695,7 @@ Client behavior:
 
 - Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
 - If the matched record is a **shared-PSK record** (not bound to a `server_id`; may back other servers - see [Records](#records)), the client MUST NOT remove it. It still sends `client/goodbye` reason `'unpaired'` and closes. Wholesale removal of a shared record requires [`management/remove-record`](#server--client-managementremove-record).
-- If the connection's `trust_level` is `'none'` (e.g., an in-flight pairing handshake), ignore the message and continue unchanged.
+- If the session is [unpaired](#definitions), there is no record to remove, so ignore the message and continue unchanged.
 
 ### Client → Server: `client/goodbye`
 
@@ -713,11 +708,10 @@ Upon receiving this message, the server should initiate the disconnect.
   - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
-  - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` without `'user'` [trust level](#definitions)), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
+  - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` on an [unpaired](#definitions) session), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
-
 
 **Note:** On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
 
@@ -725,11 +719,11 @@ Clients may close the connection without sending this message (e.g., crash, netw
 
 - On a connection whose `activities` are empty, or include `'playback'`, servers should assume the disconnect reason is `restart` and attempt to auto-reconnect.
 - Otherwise, servers should treat the drop as a session termination and not auto-reconnect; resumption, if desired, is operator-driven.
-- Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops when a long-term PSK has become invalid (e.g., after a client factory reset). After repeated consecutive failures, the server SHOULD NOT keep auto-reconnecting until there is reason to expect success (e.g., the operator re-initiates pairing or network conditions change).
+- Servers should also apply backoff on repeated Noise-handshake failures to avoid tight reconnect loops. After repeated consecutive failures, the server SHOULD stop auto-reconnecting until there is reason to expect success (e.g., the client re-announces via mDNS or network conditions change).
 
 ## Pairing
 
-Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered `long_term_psk`, bringing the channel to the new trust level without closing the WebSocket.
+Pairing is the one-time setup that mutually authenticates a client and a server. The pairing flow uses the same WebSocket endpoint and [`KKpsk2`](#encryption) Noise pattern as every other connection; only the PSK fed into the handshake and the client's post-handshake routing differ (see [Pre-Shared Key](#pre-shared-key)). After any successful pairing both sides persist the new pairing record, then the server initiates an in-band [re-handshake](#re-handshake) to the newly delivered `long_term_psk`, promoting the channel to a paired session without closing the WebSocket.
 
 This specification defines three pairing methods. Servers must implement all three; clients must implement Pairing PSK and may additionally implement either or both pairing-code methods.
 
@@ -764,9 +758,13 @@ A server MAY send such a cancelling `server/activate` at any point during a pair
 
 ### Unpaired Access
 
-A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session's [trust level](#definitions) is `'none'`, so [management](#management) operations remain unavailable. Servers SHOULD consider their role-activation policy on such sessions in light of the MITM exposure described below. The default is the manufacturer's choice. The client's toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and its current setting is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`. Servers must likewise allow their operator to enable or disable offering unpaired access. The offer is conveyed to the client through [`active_roles`](#server--client-serveractivate), not a separate flag.
+A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](#definitions), so [management](#management) operations remain unavailable. Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, the toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
 
-**Security.** Unpaired playback connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and in the unpaired case neither peer's static key is bound to its identity by any authenticated out-of-band exchange; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
+On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist and SHOULD be revocable by the operator. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate).
+
+While a client is unapproved, the server SHOULD identify and present it to the operator. When presenting clients, a server MUST clearly distinguish those that are neither paired nor approved from those that are, so a new client claiming a familiar name cannot pass for an existing device. The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
+
+**Security.** Unpaired connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and in the unpaired case neither peer's static key is bound to its identity by any authenticated out-of-band exchange; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
 ### Pairing PSK Flow
 
@@ -895,7 +893,7 @@ Brute-force protection for the Dynamic Pairing Code Flow is built around a failu
 - **Counter.** The client maintains a single failure counter for the method, persisted across reboots. It is not partitioned by `server_id` or source IP.
 - **Increment.** The counter increments on each inner-authentication failure the client itself detects: its own verification of `server_kc` fails. No other event increments it.
 - **Reset.** The counter resets to zero when the client's verification of `server_kc` succeeds, whether or not the attempt finalizes.
-- **Escalation.** When the counter reaches **10**, the method is **escalated**: every subsequent attempt is gesture-gated until a reset de-escalates it. Escalation is not an error state - the method stays offered.
+- **Escalation.** When the counter reaches **5**, the method is **escalated**: every subsequent attempt is gesture-gated until a reset de-escalates it. Escalation is not an error state - the method stays offered.
 
 ### Static Pairing Code Flow
 
@@ -1109,7 +1107,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 ## Management
 
-This section covers the management commands a paired (`user`-trust) server may issue.
+This section covers the management commands a paired server may issue.
 
 Management commands are scoped to connections with `'management'` in their [`activities`](#server--client-serveractivate). When the server adds `'management'` to the activity set, the client validates that the matched PSK is a [long-term PSK](#definitions) (i.e. the server is paired); if not, it closes the connection with [`client/goodbye`](#client--server-clientgoodbye) reason `'unauthorized'`. If a `management/*` message arrives on a connection without `'management'` in activities, the client replies with [`management/result`](#client--server-managementresult) `permission_denied`.
 
@@ -1117,7 +1115,7 @@ All `management/*` requests are answered by a single [`management/result`](#clie
 
 ### Records
 
-Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](#definitions); every record carries `user` [trust level](#definitions). Records come in two kinds:
+Read, create, and remove the pairing records stored by the client. Each record holds a [long-term PSK](#definitions), so any session it authenticates is [paired](#definitions). Records come in two kinds:
 
 - **Stored-pubkey records** bind a long-term PSK to a specific `server_id`.
 - **Shared-PSK records** hold a PSK without an associated `server_id` - the same record may authenticate any server that holds the PSK.
@@ -1278,11 +1276,11 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
   - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
-**Note:** Servers must support all audio codecs: 'opus', 'flac', and 'pcm'.
+Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
 For the initial [`stream/start`](#server--client-streamstart) the server SHOULD select the highest-priority `supported_formats` entry it can produce for the current track. It MAY select a lower-priority entry when warranted, for example to match a track's native sample rate and avoid resampling, and MAY switch formats on a later track by sending a new `stream/start`.
 
-**Note:** [`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players should report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Both should factor in expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients). Do not include `output_delay_ms` in these values; the server applies `output_delay_ms` separately when calculating send-ahead.
+[`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players SHOULD report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Players SHOULD factor expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients) into both values, and MUST NOT include `output_delay_ms` in either; the server applies `output_delay_ms` separately when calculating send-ahead.
 
 **Server behavior:**
 - `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
@@ -1314,12 +1312,10 @@ State updates must be sent whenever any state changes, including when the volume
 - `player`: object
   - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
   - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `output_delay_ms`: integer - output delay in milliseconds (0-5000), REQUIRED for players
-  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency), REQUIRED for players. Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
-  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. REQUIRED for players. See [Measuring timing parameters](#client--server-clientstate-player-object).
-  - `supported_commands?`: string[] - subset of: 'set_output_delay'
-
-**Delta updates:** The presence requirements above (REQUIRED fields, and fields that MUST be included when a command is supported) describe a player's full state, reported in the initial message. In any later update a player MAY omit fields whose values have not changed, per the delta rules in [`client/state`](#client--server-clientstate).
+  - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
+  - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
+  - `supported_commands`: string[] - subset of: 'set_output_delay', empty when the player accepts no commands
 
 **Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients must persist `output_delay_ms` locally across reboots and server reconnections. Clients may update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
@@ -1343,7 +1339,7 @@ The requested format MUST be one the client listed in its [`supported_formats`](
 
 Response when a `player` stream is active: [`stream/start`](#server--client-streamstart) with the new format.
 
-**Note:** Clients should use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+**Note:** Clients can use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `server/command` player object
 
@@ -1451,7 +1447,7 @@ A device MAY implement both the `source` and `player` roles (e.g., a speaker wit
 
 A source client uses the same [clock synchronization](#clock-synchronization) mechanism as all clients. It timestamps each binary source audio message in the server time domain by inverting the filter's server-to-local mapping (`t_local = compute_client_time(t_server)`): for a capture at local time `t_capture` it sends the `t_server` that maps to it. The mapping is linear in the filter's offset and drift, so this inverse is well-defined; apply both offset and drift, not offset alone.
 
-**Pairing required:** A source captures potentially sensitive audio (microphone, line-in), so `source@v1` MUST only run on a paired connection ([trust level](#definitions) `user`) and a source client MUST NOT stream when the trust level is `none`. If a server activates `source@v1` at trust level `none`, the client refuses it and closes the connection, following the central rules in [`server/activate`](#server--client-serveractivate).
+**Unpaired access:** As `source@v1` exposes the server's audio stack to arbitrary input, activating it for an unauthenticated device requires explicit [approval](#unpaired-access). Approval implied by other use of the device, such as starting playback on it, does not extend to `source@v1`: the server leaves the role out of [`active_roles`](#server--client-serveractivate) until explicit approval. Clients with a privacy-sensitive input such as a microphone SHOULD ship with unpaired access disabled: the captured audio would otherwise be accessible to anyone on the network.
 
 ### Client → Server: `client/hello` source@v1 support object
 
@@ -1633,21 +1629,21 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
 
 - `metadata`: object
   - `timestamp`: integer - server clock time in microseconds for when this metadata is valid
-  - `title?`: string | null - track title
-  - `artist?`: string | null - primary artist(s)
-  - `album_artist?`: string | null - album artist(s)
-  - `album?`: string | null - name of the album or release that this track belongs to
-  - `artwork_url?`: string | null - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
-  - `year?`: integer | null - release year in YYYY format
-  - `track?`: integer | null - track number on the album (1-indexed), null if unknown or not applicable
-  - `progress?`: object | null - playback progress information. The server must send this object whenever playback state changes (play, pause, resume, seek, playback speed change)
-    - `track_progress`: integer - current playback position in milliseconds since start of track
+  - `title?`: string - track title
+  - `artist?`: string - primary artist(s)
+  - `album_artist?`: string - album artist(s)
+  - `album?`: string - name of the album or release that this track belongs to
+  - `artwork_url?`: string - URL to artwork image. Useful for clients that want to forward metadata to external systems or for powerful clients that can fetch and process images themselves
+  - `year?`: integer - release year in YYYY format
+  - `track?`: integer - track number on the album (1-indexed), absent if unknown or not applicable
+  - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server must send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change)
+    - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
 
 #### Calculating current track position
 
-Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the last metadata message that included the `progress` object:
+Clients can calculate the current track position at any time using the `timestamp` and `progress` values from the current metadata state:
 
 ```python
 calculated_progress = metadata.progress.track_progress + (current_time - metadata.timestamp) * metadata.progress.playback_speed / 1000000
@@ -1672,15 +1668,17 @@ The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello)
 - `artwork@v1_support`: object
   - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - image format identifier
-    - `media_width`: integer - max width in pixels
-    - `media_height`: integer - max height in pixels
+    - `format`: 'jpeg' | 'png' - image format identifier
+    - `width`: integer - width in pixels of the delivered image
+    - `height`: integer - height in pixels of the delivered image
 
-**Note:** The server will scale images to fit within the specified dimensions while preserving aspect ratio. Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
+The server MUST deliver each image at exactly the `width` by `height` declared for the channel. It MUST scale the source image to fit within those dimensions preserving its aspect ratio, MUST pad the remaining area with black, and MUST NOT crop the image.
+
+**Note:** Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
 
 **None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
-**Note:** Servers must support all image formats: 'jpeg', 'png', and 'bmp'.
+Servers MUST support 'jpeg' and 'png'.
 
 ### Client → Server: `stream/request-format` artwork object
 
@@ -1693,9 +1691,9 @@ Response when an `artwork` stream is active: [`stream/start`](#server--client-st
 - `artwork`: object
   - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
   - `source?`: 'album' | 'artist' | 'none' - artwork source type
-  - `format?`: 'jpeg' | 'png' | 'bmp' - requested image format identifier
-  - `media_width?`: integer - requested max width in pixels
-  - `media_height?`: integer - requested max height in pixels
+  - `format?`: 'jpeg' | 'png' - requested image format identifier
+  - `width?`: integer - requested width in pixels
+  - `height?`: integer - requested height in pixels
 
 ### Server → Client: `stream/start` artwork object
 
@@ -1704,13 +1702,13 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 - `artwork`: object
   - `channels`: object[] - configuration for each artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' | 'bmp' - format of the encoded image
+    - `format`: 'jpeg' | 'png' - format of the encoded image
     - `width`: integer - width in pixels of the encoded image
     - `height`: integer - height in pixels of the encoded image
 
 The `channels` array covers every channel index the client declared in [`artwork@v1_support`](#client--server-clienthello-artworkv1-support-object) in the same order. A channel the server is not streaming is represented as `source: 'none'`.
 
-Each channel's configuration MUST stay within the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by [`stream/request-format`](#client--server-streamrequest-format-artwork-object). The `source` and `format` MUST match the declaration, and `width`/`height` MUST NOT exceed the declared `media_width`/`media_height`.
+Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source`, `format`, `width`, and `height` MUST match the declaration.
 
 **Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change.
 
@@ -1838,9 +1836,9 @@ The `color` object in [`server/state`](#server--client-serverstate) has this str
 
 - `color`: object
   - `timestamp`: integer - server clock time in microseconds for when these colors are valid
-  - `background_dark?`: integer[] | null - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
-  - `background_light?`: integer[] | null - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
-  - `primary?`: integer[] | null - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
-  - `accent?`: integer[] | null - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
-  - `on_dark?`: integer[] | null - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
-  - `on_light?`: integer[] | null - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
+  - `background_dark?`: integer[] - background color suitable for dark mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with white text and with `on_dark` (if also present).
+  - `background_light?`: integer[] - background color suitable for light mode as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with black text and with `on_light` (if also present).
+  - `primary?`: integer[] - the dominant color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
+  - `accent?`: integer[] - a secondary or complementary color, as `[R, G, B]` with values 0-255. Not adjusted for contrast.
+  - `on_dark?`: integer[] - a light color suitable for use on dark backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_dark` (if also present) and with black text, so it can also serve as an alternative light background.
+  - `on_light?`: integer[] - a dark color suitable for use on light backgrounds, as `[R, G, B]` with values 0-255. The server must ensure a minimum WCAG contrast ratio of 4.5:1 with `background_light` (if also present) and with white text, so it can also serve as an alternative dark background.
