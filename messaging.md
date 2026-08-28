@@ -264,7 +264,7 @@ Sent once the client is ready to report its operational status (`available`), an
 
 A client whose `active_roles` include `artwork` or `visualizer` sends the initial `client/state` even when none of its roles defines a state object; `available` alone unlocks the server's streams.
 
-Every message MUST carry `available` and the full state of each role object it includes.
+Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 - `available`: boolean - whether the client is available to participate in Sendspin playback
   - `true` - client is operational and ready to participate in playback; for a player or source this means its clock is synchronized with the server.
@@ -316,7 +316,7 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Server sends state updates to the client. Contains role-specific state objects.
 
-Every message MUST carry the full state of each role object it includes.
+Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
 A role object set to `null` clears all of that role's state.
 
