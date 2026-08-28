@@ -1623,7 +1623,7 @@ The `metadata` object in [`server/state`](#server--client-serverstate) has this 
   - `year?`: integer - release year in YYYY format
   - `track?`: integer - track number on the album (1-indexed), absent if unknown or not applicable
   - `progress?`: object - playback progress information. Omitting it clears the client's position, so include it in every `metadata` state that has a position to report. The server must send a new `metadata` state whenever playback state changes (play, pause, resume, seek, playback speed change)
-    - `track_progress`: integer - current playback position in milliseconds since start of track
+    - `track_progress`: integer - playback position in milliseconds since start of track, measured at `timestamp`
     - `track_duration`: integer - total track length in milliseconds, 0 for unlimited/unknown duration (e.g., live radio streams)
     - `playback_speed`: integer - playback speed multiplier * 1000 (e.g., 1000 = normal speed, 1500 = 1.5x speed, 500 = 0.5x speed, 0 = paused)
 
