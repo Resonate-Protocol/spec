@@ -18,8 +18,6 @@ Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the d
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
 
-A disabled method is omitted from [`supported_pair_methods`](messaging.md#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](connection.md#pre-shared-key)).
-
 ### Pairing Records
 
 Each successful pairing produces a pairing record: the new [long-term PSK](README.md#definitions) persisted together with the server's `server_id` (see [Pre-Shared Key](connection.md#pre-shared-key)). A repeat pairing with a server that already holds a record replaces that record.

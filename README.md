@@ -257,7 +257,7 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
                 = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
 ```
 
-The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a [disabled pairing method](#pairing) is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
+The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a disabled pairing method is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
 
 Each [long-term PSK](#definitions) is persisted in a [pairing record](#pairing-records) alongside the server's `server_id`. After a `psk_id` match, the client verifies that the matched PSK's stored `server_id` equals the one in [`server/init`](#server--client-serverinit); mismatch fails the handshake. Authentication relies on both the static keys and the PSK.
 
@@ -483,7 +483,7 @@ Players that can output audio should have the role `player`.
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). An implemented method that is [disabled](#pairing) is omitted. Every client implements at least the Pairing PSK method (see [Pairing](#pairing)).
+- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). An implemented method that is disabled is omitted. Every client implements at least the Pairing PSK method (see [Pairing](#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
   - `enabled`: boolean
 
@@ -742,8 +742,6 @@ The client reveals the new long-term PSK only after `server_kc` verifies, and on
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device. A pairing attempt that arrives while another connection is playing is rejected (see [Multiple servers](#multiple-servers-server-initiated)); the operator must stop playback before initiating pairing.
 
 Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dynamic_pairing_code` and prefer it to `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code SHOULD also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
-
-A disabled method is omitted from [`supported_pair_methods`](#client--server-clienthello) and its PSK, if any, is excluded from the handshake candidate set (see [Pre-Shared Key](#pre-shared-key)).
 
 ### Pairing Records
 
