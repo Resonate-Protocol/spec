@@ -102,9 +102,10 @@ sequenceDiagram
   - **Color** - receives colors derived from the current audio
 - **Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
 - **Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
-- **Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots
-- **long-term PSK** - a 32-byte pre-shared symmetric secret established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. Must be drawn from a CSPRNG or equivalent high-entropy source.
-- **pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server as a [pairing token](#pairing-token), copied as text or scanned as a QR code. Distinct from the long-term PSK that pairing produces. Must be drawn from a CSPRNG or equivalent high-entropy source.
+- **CSPRNG** - a cryptographically secure pseudorandom number generator seeded with sufficient entropy ([RFC 4086](https://www.rfc-editor.org/rfc/rfc4086)); a hardware RNG qualifies
+- **Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots. The private key MUST be drawn from a CSPRNG.
+- **long-term PSK** - a 32-byte pre-shared symmetric secret established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. MUST be drawn from a CSPRNG.
+- **pairing PSK** - a 32-byte symmetric secret used as the PSK in the [Pairing PSK method](#pairing). It is always distributed alongside the client's static public key (`client_id`), which the server needs to verify the client identity. The operator enters it into the server as a [pairing token](#pairing-token), copied as text or scanned as a QR code. Distinct from the long-term PSK that pairing produces. MUST be drawn from a CSPRNG.
 - **Pairing Code** - a value used in code-based [pairing](#pairing) methods. The static-pairing-code method uses a fixed 8-digit decimal value; the dynamic-pairing-code method uses a per-session generated value, emitted as a 6-digit decimal code or as a QR code (see [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)).
 - **Factory Reset** - returns a device to its manufactured state: credentials and settings the manufacturer provisioned (identity keypair, pairing PSK, static pairing code, a calibrated [output delay](#client--server-clientstate-player-object)) are restored; everything accumulated since, pairing records included, is cleared.
 - **Paired Session** - a session keyed by a long-term PSK, meaning the client holds a pairing record for the server. Sessions keyed by the pairing PSK or the Sentinel PSK are *unpaired*, which limits the server to a pairing exchange, or to normal playback and control flows where [unpaired access](#unpaired-access) is enabled. Neither side sends this on the wire: both derive it from the PSK that matched during the [Noise](#encryption) handshake.
@@ -225,7 +226,7 @@ The client picks one suite and announces it in [`client/init`](#client--server-c
 
 ### Identities
 
-The `client_id` and `server_id` fields are the base64url-encoded (no padding) Curve25519 public keys of the client and server respectively, 43 characters each. These keys serve both as routing/persistence identifiers and as the static keys used in the Noise handshake.
+The `client_id` and `server_id` fields are the base64url-encoded (no padding) Curve25519 public keys of the client and server respectively, 43 characters each. These keys serve both as routing/persistence identifiers and as the static keys used in the Noise handshake. The private keys MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices.
 
 **Key rotation.** Each side's static keypair is intended to be long-lived; the identifier is the pubkey, so rotating the keypair changes the identity. A server that rotates its static keypair (e.g., reprovisioned hardware, migrated host, lost private key) appears to clients as a different server. Operators who want to preserve identity across server moves must preserve the server's static private key (e.g., as part of the server's backup/restore set).
 
@@ -272,6 +273,10 @@ The server verifies the second handshake message against the PSK its first messa
 
 The session proceeds as an ordinary [unpaired](#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
 
+### Locked-Down Clients
+
+A client is **locked down** when it admits no [unpaired access](#unpaired-access) and offers no pairing method (every implemented method [disabled](#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](#server--client-serverhello) with [`client/goodbye`](#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](#client--server-clienthello) and closes.
+
 ### Prologue
 
 The prologue mixed into the Noise handshake state on both sides is the concatenation of the exact bytes of [`client/init`](#client--server-clientinit) followed by the exact bytes of [`server/init`](#server--client-serverinit), as transmitted on the wire (the JSON-encoded UTF-8 message body, without the WebSocket framing). This binds the cleartext init exchange to the handshake; tampering causes the handshake to fail.
@@ -301,7 +306,7 @@ Once the WebSocket connection is established, Client and Server perform an initi
 7. Client → Server: [`client/hello`](#client--server-clienthello) (encrypted)
 8. Server → Client: [`server/activate`](#server--client-serveractivate) (encrypted)
 
-No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives. See [Encryption](#encryption) for cryptographic details.
+No other messages should be sent before the initial [`server/activate`](#server--client-serveractivate) arrives, except possibly [`client/goodbye`](#client--server-clientgoodbye). See [Encryption](#encryption) for cryptographic details.
 
 Cleartext handshake messages (`client/init`, `server/init`, `noise/handshake`) are sent as WebSocket **text** frames containing JSON. After the encrypted channel is established, all messages are sent as WebSocket **binary** frames carrying Noise transport ciphertexts.
 
@@ -453,7 +458,7 @@ The same `noise/handshake` message is used for the in-band [re-handshake](#re-ha
 
 ### Server → Client: `server/hello`
 
-First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`). This message will be followed by a [`client/hello`](#client--server-clienthello) message from the client.
+First message sent by the server after the Noise handshake completes. Sent as an encrypted message (binary frame, message type `0`).
 
 - `name`: string - friendly name of the server
 - `languages?`: string[] - non-empty list of [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags in descending operator preference (e.g. `["ca", "es", "en"]`) - a hint about the languages the operator understands, informing any operator-facing output
@@ -493,8 +498,6 @@ A server MUST NOT activate a role version that was listed in `supported_roles` w
 ### Server → Client: `server/activate`
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
-
-Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message).
 
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
@@ -706,13 +709,14 @@ Sent by the client before gracefully closing the connection. This allows the cli
 
 Upon receiving this message, the server should initiate the disconnect.
 
-- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'concurrent_attempt' | 'unpaired'
+- `reason`: 'another_server' | 'shutdown' | 'restart' | 'user_request' | 'unauthorized' | 'pairing_required' | 'locked_down' | 'concurrent_attempt' | 'unpaired'
   - `another_server` - client is switching to a different server. A client that leaves one server for another MUST send this reason to the server it is leaving. Server SHOULD NOT auto-reconnect but SHOULD show the client as available for future playback
   - `shutdown` - client is shutting down. When the device is powering off or otherwise not coming back and no more specific reason applies, clients SHOULD send this reason. Server should not auto-reconnect
   - `restart` - client is restarting and will reconnect. Server should auto-reconnect
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
   - `unauthorized` - the client is no longer authorized for the connection: either the server declared an activity set the client is not authorized for (e.g., `'management'` on an [unpaired](#definitions) session), or the client removed its own pairing record (see [`management/remove-record`](#server--client-managementremove-record)) and can no longer authenticate. Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused an [unpaired access](#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
+  - `locked_down` - the client is [locked down](#locked-down-clients), so an unpaired server can neither use nor pair it. Sent in place of [`client/hello`](#client--server-clienthello). Server should not auto-reconnect
   - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'management'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
@@ -763,9 +767,9 @@ A server MAY send such a cancelling `server/activate` at any point during a pair
 
 A client MAY admit a server with no pairing record to activate roles or declare the `'playback'` activity. The session is [unpaired](#definitions), so [management](#management) operations remain unavailable. Whether a client admits unpaired access is governed by its `unpaired_access` setting: the default is the manufacturer's choice, the toggle is exposed at runtime via [`management/set-pairing-config`](#server--client-managementset-pairing-config), and the current value is advertised in [`client/hello`](#client--server-clienthello) as `unpaired_access.enabled`.
 
-On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist and SHOULD be revocable by the operator. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate).
+On the server side, unpaired access is gated by **operator approval**, granted per [`client_id`](#definitions): a server MUST NOT declare `'playback'` or activate roles on a Sentinel-keyed connection to a client its operator has not approved. The operator grants approval through a dedicated approval control. A server MAY also take an operator action that clearly means to use the client, such as starting playback on it, as implied approval. Approval SHOULD persist, MUST be revocable by the operator, and MUST be discarded on a successful pairing. There is no wire flag on the server's side: it extends unpaired access simply by activating roles or declaring `'playback'` in [`server/activate`](#server--client-serveractivate). The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
 
-While a client is unapproved, the server SHOULD identify and present it to the operator. When presenting clients, a server MUST clearly distinguish those that are neither paired nor approved from those that are, so a new client claiming a familiar name cannot pass for an existing device. The server MAY hold the connection at empty `activities`, ready to activate roles once approved, or to enter pairing.
+While a client is unapproved, the server SHOULD identify and present it to the operator. When presenting clients, a server MUST clearly distinguish those that are neither paired nor approved from those that are, so a new client claiming a familiar name cannot pass for an existing device. When an unapproved client offers pairing, the server MUST present it as a clearly available action for that client. For an approved client, pairing SHOULD stay available as an upgrade.
 
 **Security.** Unpaired connections are vulnerable to **man-in-the-middle attacks**. The Sentinel PSK is a published constant, and in the unpaired case neither peer's static key is bound to its identity by any authenticated out-of-band exchange; an attacker on the local network may therefore impersonate either side. The Noise handshake still provides confidentiality and replay protection for the session itself, but offers no assurance about which peer it was established with.
 
@@ -773,7 +777,7 @@ While a client is unapproved, the server SHOULD identify and present it to the o
 
 The Noise handshake completes using the pairing PSK, authenticating both sides. The client proceeds straight to [`client/pair-finalize`](#client--server-clientpair-finalize).
 
-**Lifecycle.** The client's pairing PSK is generated from a CSPRNG per device - never a shared default - provisioned at manufacture or generated by the client, and persists across reboots. It is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`pairing_psk.psk`) from a paired server. Rotation invalidates previously distributed copies but leaves established pairing records untouched.
+**Lifecycle.** The client's pairing PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices, whether provisioned at manufacture or generated by the client. It persists across reboots and is per-client and long-lived: a successful pairing does not consume or rotate it (pairing produces a separate [long-term PSK](#definitions)), so it can pair the client with any number of servers. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`pairing_psk.psk`) from a paired server. Rotation invalidates previously distributed copies but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
@@ -854,8 +858,8 @@ sequenceDiagram
 
 **Binding values.** The Dynamic Pairing Code Flow introduces three values across two messages that bind the pairing code to the underlying Noise handshake:
 
-- `nonce_A` - 32 bytes drawn from a CSPRNG by the server, sent in [`server/pair-init`](#server--client-serverpair-init), base64url-encoded (43 chars).
-- `nonce_B` - 32 bytes drawn from a CSPRNG by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it as `wrapped_nonce_B`, [sealed under the CPace output](#wrapping).
+- `nonce_A` - 32 bytes drawn from a [CSPRNG](#definitions) by the server, sent in [`server/pair-init`](#server--client-serverpair-init), base64url-encoded (43 chars).
+- `nonce_B` - 32 bytes drawn from a [CSPRNG](#definitions) by the client, kept private until [`client/pair-confirm`](#client--server-clientpair-confirm) reveals it as `wrapped_nonce_B`, [sealed under the CPace output](#wrapping).
 - `commit_B` - `SHA-256("sendspin-pair-commit-v1" || nonce_B)`, sent by the client in [`client/pair-init`](#client--server-clientpair-init) before any value from the server is known (32 bytes base64url-encoded, 43 chars). Locks the client's contribution to the pairing code derivation.
 
 **Pairing code derivation.** Both formats derive the pairing code from the same digest of the Noise handshake hash `h` and the two nonces:
@@ -909,7 +913,7 @@ Brute-force protection for the Dynamic Pairing Code Flow is built around a failu
 
 Pairing with a fixed pairing code. The operator types it into the server, where a [PAKE](#pake) round authenticates both sides. Every attempt is gesture-gated by a [pairing window](#pairing-window).
 
-**Lifecycle.** The static pairing code is a fixed 8-digit value. A factory-provisioned pairing code MUST be randomly generated per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`static_pairing_code.code`) from a paired server. Rotation invalidates a previously printed or distributed pairing code but leaves established pairing records untouched.
+**Lifecycle.** The static pairing code is a fixed 8-digit value. A factory-provisioned pairing code MUST be drawn uniformly at random from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices; a shared default would let anyone pair with any such device. The client MUST NOT rotate it on its own; rotation happens through a deliberate local operator action (manufacturer-defined) or via [`management/set-pairing-config`](#server--client-managementset-pairing-config) (`static_pairing_code.code`) from a paired server. Rotation invalidates a previously printed or distributed pairing code but leaves established pairing records untouched.
 
 ```mermaid
 sequenceDiagram
@@ -1036,7 +1040,9 @@ Each entry in `supported_pair_methods` in [`client/hello`](#client--server-clien
   - `sample_rate`: integer - sample rate in Hz (e.g., 16000)
   - `bit_depth`: integer - bit depth (e.g., 16); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `max_bytes`: integer - maximum total encoded size of the ten clips in bytes
-- `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. When the secret is rotated, the client updates the hint accordingly.
+- `locations?`: ('device' | 'leaflet' | 'operator')[] - informational hint for `static_pairing_code` and `pairing_psk` only, listing where the operator can find the method's configured secret: printed on the device, on a leaflet in the box, or set by the operator. A printed pairing PSK MUST be rendered as a QR code of its [pairing token](#pairing-token). When the secret is rotated, the client updates the hint accordingly.
+
+A server MUST ignore a descriptor whose `method` it does not recognize - leaving its other fields unvalidated - and select only among the rest. On a `dynamic_pairing_code` descriptor it likewise ignores unrecognized `formats` and `out_channels` entries, treating a descriptor left with none of either as unrecognized; an unrecognized `digit_audio.codec` is treated as `'speaker'` being absent. Unrecognized `locations` values are ignored. Identifiers not defined here are reserved for future revisions of this specification. As with [unimplemented roles](#detecting-outdated-servers), servers should track ignored identifiers: they indicate the client speaks a newer revision than the server.
 
 ### Messages
 
@@ -1063,7 +1069,7 @@ Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent onc
 
 Server's nonce contribution in the [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow). Sent in response to [`client/pair-init`](#client--server-clientpair-init).
 
-- `nonce_A`: string - 32 bytes from a CSPRNG, base64url-encoded (43 chars). See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)
+- `nonce_A`: string - 32 bytes drawn from a [CSPRNG](#definitions), base64url-encoded (43 chars). See [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow)
 
 In a `digits` attempt with a speaker client, this message follows the ten [digit audio clips](#server--client-digit-audio-clip-binary) and completes the pack. Upon receipt, the client derives and emits the pairing code; the operator then types or scans it into the server.
 
@@ -1246,7 +1252,7 @@ The client creates a stored-pubkey record bound to the server, holding a freshly
 
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
 
-The pre-provisioned record's PSK MUST be device-specific (randomly generated, unique per device) and MUST NOT be a fixed default shared across devices.
+The pre-provisioned record's PSK MUST be drawn from a [CSPRNG](#definitions) per device and MUST NOT be a fixed default shared across devices.
 
 ### Server → Client: `management/open-pairing-window`
 

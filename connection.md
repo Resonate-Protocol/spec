@@ -86,7 +86,7 @@ The client picks one suite and announces it in [`client/init`](messaging.md#clie
 
 ### Identities
 
-The `client_id` and `server_id` fields are the base64url-encoded (no padding) Curve25519 public keys of the client and server respectively, 43 characters each. These keys serve both as routing/persistence identifiers and as the static keys used in the Noise handshake.
+The `client_id` and `server_id` fields are the base64url-encoded (no padding) Curve25519 public keys of the client and server respectively, 43 characters each. These keys serve both as routing/persistence identifiers and as the static keys used in the Noise handshake. The private keys MUST be drawn from a [CSPRNG](README.md#definitions) per device and MUST NOT be a fixed default shared across devices.
 
 **Key rotation.** Each side's static keypair is intended to be long-lived; the identifier is the pubkey, so rotating the keypair changes the identity. A server that rotates its static keypair (e.g., reprovisioned hardware, migrated host, lost private key) appears to clients as a different server. Operators who want to preserve identity across server moves must preserve the server's static private key (e.g., as part of the server's backup/restore set).
 
@@ -132,6 +132,10 @@ A `psk_id` lookup miss means the server referenced a credential the client canno
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](pairing.md#pairing) or [management](management.md#records).
 
 The session proceeds as an ordinary [unpaired](README.md#definitions) Sentinel connection, except that the server MUST NOT activate roles or declare the `'playback'` activity while its pairing record exists - the session carries a [pairing](pairing.md#pairing) exchange or stays idle. The server SHOULD surface the mismatch to its operator and offer re-pairing, which replaces the record and restores normal service.
+
+### Locked-Down Clients
+
+A client is **locked down** when it admits no [unpaired access](pairing.md#unpaired-access) and offers no pairing method (every implemented method [disabled](management.md#server--client-managementset-pairing-config)). A Sentinel-keyed session is then of no use to either side: the server can neither pair the client nor use it. The client completes the handshake, then answers [`server/hello`](messaging.md#server--client-serverhello) with [`client/goodbye`](messaging.md#client--server-clientgoodbye) reason `'locked_down'` in place of [`client/hello`](messaging.md#client--server-clienthello) and closes.
 
 ### Prologue
 

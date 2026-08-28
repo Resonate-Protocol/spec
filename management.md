@@ -108,7 +108,7 @@ The client creates a stored-pubkey record bound to the server, holding a freshly
 
 `psk_id` MUST reference a shared-PSK record. This constraint is enforced at configuration time: any management request that would set `psk_id` to a missing or stored-pubkey record is rejected, and the referenced shared-PSK record cannot be removed while the reference exists. Both operations are rejected as `invalid`. By default, `psk_id` points to a pre-provisioned shared-PSK record.
 
-The pre-provisioned record's PSK MUST be device-specific (randomly generated, unique per device) and MUST NOT be a fixed default shared across devices.
+The pre-provisioned record's PSK MUST be drawn from a [CSPRNG](README.md#definitions) per device and MUST NOT be a fixed default shared across devices.
 
 ### Server → Client: `management/open-pairing-window`
 
