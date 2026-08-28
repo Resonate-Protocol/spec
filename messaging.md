@@ -202,7 +202,7 @@ A server MUST NOT activate a role version that was listed in `supported_roles` w
 
 Declares the server's current purpose on this connection. Sent as an encrypted message (binary frame, message type `0`). May be re-sent any time to change the activity set.
 
-Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message if the client has roles that require state updates).
+Only after receiving the initial `server/activate` should the client send any other messages (including [`client/time`](#client--server-clienttime) and the initial [`client/state`](#client--server-clientstate) message).
 
 - `activities`: ('playback' | 'pairing' | 'management')[] - the set of currently-active purposes on this connection. May be empty. Members are unordered and unique.
 - `active_roles?`: string[] - versioned roles that are active for this client (e.g., `player@v1`, `controller@v1`). Required on the first `server/activate`; persists across subsequent `server/activate` messages that omit it. MUST be empty on connections not capable of playback (see below). A client treats a first `server/activate` that omits it as carrying an empty `active_roles`.
@@ -262,7 +262,7 @@ Client sends state updates to the server. Contains client-level state and role-s
 
 Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send an update that includes that role's object.
 
-A client whose `active_roles` include `artwork` or `visualizer` sends the initial `client/state` even when none of its roles defines a state object; `available` alone unlocks the server's streams.
+A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
 Every message MUST carry `available` and the full state of each role object it includes. Omitting a role object leaves that role's state unchanged.
 
