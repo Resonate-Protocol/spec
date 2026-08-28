@@ -210,7 +210,7 @@ Sendspin uses the `KKpsk2` Noise pattern. Both static keys are pre-known to both
 
 The **server is the Noise initiator**, the **client is the Noise responder**, regardless of which side initiated the WebSocket connection.
 
-**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions' transport traffic (the exception is the first handshake message's `psk_id` payload, recoverable with the client's static key). Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
+**Security properties.** Forward secrecy is provided by the ephemeral-key DH in each handshake: compromise of static keys or the PSK does not retroactively decrypt prior sessions' transport traffic (the exception is the first handshake message's payload, recoverable with the client's static key). Replay protection is provided by Noise's per-direction transport counter; a repeated or out-of-order ciphertext fails AEAD decryption and aborts the connection.
 
 ### Cipher Suites
 
@@ -233,15 +233,15 @@ The `client_id` and `server_id` fields are the base64url-encoded (no padding) Cu
 
 The PSK is mixed into the handshake state at the end of the second handshake message (the `psk2` modifier). The transport-mode keys derived after the handshake therefore include the PSK, but the first handshake message's payload (sent by the server) is encrypted without the PSK mixed in.
 
-To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
+To let the client select the right PSK before the PSK must be mixed in, the server includes a `psk_id` and a `psk_category` in the first handshake message's payload. The identifier is a 43-character base64url-encoded value (no padding) of a 32-byte SHA-256 output, derived deterministically from the PSK:
 
 ```
 psk_id = base64url(SHA-256("sendspin-psk-id-v1" || PSK))
 ```
 
-The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category and, on match, the stored category determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
+The label is the UTF-8 byte sequence of the literal characters shown (no NUL terminator, no surrounding quotes); `||` denotes byte concatenation. The same formula applies to all three PSK categories (long-term, pairing, Sentinel); the client stores each of its PSKs tagged with its category. `psk_category` declares which category the server is using the referenced PSK as - `'lt'` (long-term), `'pr'` (pairing), or `'sn'` (Sentinel) - so a match binds both sides to the same category, which determines how to proceed. The single handshake pattern (`KKpsk2`) is used in all three cases; only the PSK input differs.
 
-The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would leave the matched category ambiguous. Clients enforce this when records are configured (see [Management](#records)).
+The three PSK categories share one `psk_id` namespace, so a `psk_id` must be unique across them. Two categories sharing one would mean the same bytes serve as a PSK in both, exposing the stronger credential through the weaker channel (the [pairing token](#pairing-token) distributes the pairing PSK in cleartext, and the Sentinel PSK is public). Clients enforce this when records are configured (see [Management](#records)).
 
 The **Sentinel PSK** is a published constant used as the PSK input whenever no other PSK applies - i.e., before any pairing record exists. It provides no authentication on its own (its value is public); authentication, when needed, is established later during [Pairing](#pairing). The sentinel value is:
 
@@ -257,7 +257,7 @@ Sentinel psk_id = 0x185b15f6d2da4909bd1dc156a4ab206103abef0153bcd52d926170b95cf7
                 = base64url "GFsV9tLaSQm9HcFWpKsgYQOr7wFTvNUtkmFwuVz3zoo"
 ```
 
-The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)). A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
+The client decrypts the first handshake message's payload (possible without a PSK, as noted above), compares the included `psk_id` to the hash of each candidate PSK of the declared `psk_category`, and selects the one that matches. It then mixes that PSK in to process the second handshake message. If no candidate matches, the client falls back to the Sentinel PSK (see [Sentinel Fallback](#sentinel-fallback)); a `psk_id` the client holds only under a different category than declared is thus a lookup miss, not a match. A PSK for a pairing method disabled in the client's [pairing config](#server--client-managementset-pairing-config) is likewise excluded from the candidate set, so a handshake referencing it is treated as a lookup miss.
 
 Two storage variants are supported for [long-term PSK](#definitions) records, distinguished by whether the client also stores the server's `server_id`. The wire bytes and `psk_id` lookup are identical; only the post-match check differs.
 
@@ -266,7 +266,7 @@ Two storage variants are supported for [long-term PSK](#definitions) records, di
 
 ### Sentinel Fallback
 
-A `psk_id` lookup miss means the server referenced a credential the client cannot use: the client lost its pairing record (e.g., a [Factory Reset](#definitions) or storage failure), an interrupted [pairing finalize](#server--client-serverpair-finalize) left the client without the record the server persisted, or the referenced PSK belongs to a disabled pairing method. On a lookup miss in the initial handshake the client completes the second handshake message with the Sentinel PSK instead of failing. The fallback applies only there: a miss during a [re-handshake](#re-handshake), and a failed stored-pubkey post-match check (a misbinding, not a miss), fail the handshake as before.
+A `psk_id` lookup miss means the server referenced a credential the client cannot use: the client lost its pairing record (e.g., a [Factory Reset](#definitions) or storage failure), an interrupted [pairing finalize](#server--client-serverpair-finalize) left the client without the record the server persisted, the referenced PSK belongs to a disabled pairing method, or the client holds the referenced PSK under a different category than the declared `psk_category` (e.g., a removed record's PSK later configured as the pairing PSK). On a lookup miss in the initial handshake the client completes the second handshake message with the Sentinel PSK instead of failing. The fallback applies only there: a miss during a [re-handshake](#re-handshake), and a failed stored-pubkey post-match check (a misbinding, not a miss), fail the handshake as before.
 
 The server verifies the second handshake message against the PSK its first message referenced. If that fails and the referenced PSK was not the Sentinel, it verifies the same message against the Sentinel PSK before treating the handshake as failed. A second message that validates under the Sentinel is an authenticated **credential-mismatch signal**: the handshake authenticates the client's static key, so the signal proves its holder could not use the referenced PSK. The signal alone MUST NOT cause either side to remove or replace a record; records change only through [pairing](#pairing) or [management](#records).
 
@@ -286,7 +286,7 @@ Any handshake-phase failure - malformed cleartext message, unsupported `version`
 
 The server may rerun the Noise handshake in transport mode to swap session keys without closing the WebSocket - typically to promote the session to paired after a successful [pairing](#pairing), to switch from Sentinel to a pairing PSK, or to rotate session keys on long-running connections.
 
-The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` in noise message 1 selects the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
+The server initiates, as in the original handshake. The two [`noise/handshake`](#client--server-noisehandshake) messages are sent as encrypted binary frames inside the current channel; `psk_id` and `psk_category` in noise message 1 select the PSK for the new session. `client/init` and `server/init` are not re-sent - `client_id`, `server_id`, and `suite` carry over. The new handshake's prologue is the prior handshake's hash `h`. No other messages flow during the exchange; once the new keys are in place, the connection continues with the usual [`server/hello`](#server--client-serverhello) → [`client/hello`](#client--server-clienthello) → [`server/activate`](#server--client-serveractivate).
 
 ## Communication
 
@@ -433,6 +433,7 @@ The encrypted payload carried inside each Noise handshake message is a UTF-8 JSO
 
 - **Noise message 1 payload** (server → client): 
   - `psk_id`: string - 43-character base64url-encoded SHA-256 hash derived from the PSK. Used by the client to select the PSK before processing message 2; the message-1 payload is decryptable without the PSK (see [Pre-Shared Key](#pre-shared-key)).
+  - `psk_category`: 'lt' | 'pr' | 'sn' - the category the server is using the referenced PSK as: long-term, pairing, or Sentinel. A `psk_id` the client holds only under a different category is a lookup miss (see [Pre-Shared Key](#pre-shared-key)). The codes share one length, so the encrypted payload's length is independent of the category.
 - **Noise message 2 payload** (client → server): the empty object as the literal two bytes `{}` (not a zero-length Noise payload)
 
 A malformed inner handshake payload (not valid UTF-8 JSON of the shape above) is a handshake failure and closes the WebSocket (see [Failure Handling](#failure-handling)).
