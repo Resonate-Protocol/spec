@@ -214,7 +214,7 @@ The activity sets the server may legitimately declare are constrained by which P
 
 | PSK matched | Allowed activity sets |
 |---|---|
-| [long-term PSK](README.md#definitions) | `['pairing']` or any subset of `{'playback', 'management'}` |
+| [long-term PSK](README.md#definitions) | any subset of `{'playback', 'management'}` |
 | [pairing PSK](README.md#definitions) | `['pairing']` |
 | [Sentinel PSK](connection.md#pre-shared-key) | `[]`, `['pairing']`, `['playback']`¹ |
 
