@@ -20,9 +20,9 @@ Clients with a usable out-channel (display, speaker, etc.) SHOULD implement `dyn
 
 ### Pairing Records
 
-Each successful pairing produces a pairing record: the new [long-term PSK](README.md#definitions) persisted together with the server's `server_id`. A repeat pairing with a server that already holds a record replaces that record.
+Each successful pairing produces a pairing record: the new [long-term PSK](README.md#definitions) persisted together with the server's `server_id`. The client MUST persist the new record, replacing any record it already holds for the server.
 
-A client MUST be able to store at least 5 pairing records; more is allowed. When a pairing completes at capacity, the client MUST evict an existing record so that the new record persists - a pairing never fails for lack of record storage. Which record is evicted is implementation-defined (for example, the least recently used), except that the client MUST NOT evict the record backing a currently-open connection.
+A client MUST be able to store at least 5 pairing records; more is allowed. When a pairing completes at capacity, the client MUST evict an existing record so that the new record persists - a pairing never fails for lack of record storage. Which record is evicted is implementation-defined (for example, the least recently used), except that the client MUST NOT evict a record backing a currently-open connection, provisional or admitted; the client MUST cap its concurrently open paired connections below its record capacity (see [Multiple servers](connection.md#multiple-servers-server-initiated)) so an evictable record always exists.
 
 Eviction needs no wire signal. An evicted server's next handshake references a `psk_id` the client no longer holds and lands in the [Sentinel Fallback](connection.md#sentinel-fallback): the server receives an authenticated credential-mismatch signal and can offer its operator re-pairing.
 
@@ -248,7 +248,7 @@ Tokens are drawn only from the QR code alphanumeric set (`0–9`, `A–Z`, `:`),
 Decoding reverses the transform and MUST be lenient with operator-supplied input:
 
 1. Trim surrounding whitespace and upper-case it.
-2. If present, strip a leading `SP:`. The first character is the `version`; reject an unrecognized version.
+2. If present, strip a leading `SP:`. The first character is the `version`; reject an unrecognized version. An interface expecting a specific version rejects the others.
 3. Transliterate every `9` back to `2`, re-pad with `=` to a multiple of 8 characters, and base32-decode into the payload.
 
 A decoder MUST reject malformed input, including a payload shorter than its version defines. Payload bytes beyond those the version defines are reserved for future extension: a decoder MUST ignore them.
