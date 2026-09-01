@@ -1741,7 +1741,7 @@ An image is transferred as an announce followed by the parts of the encoded imag
 The fields are:
 
 - `type` (byte 0): uint8, `8`-`11` - corresponds to artwork channel 0-3 respectively
-- `flags` (byte 1): uint8 - bit 0 is set on an announce and bit 1 on a cancel message (defined below); a part sets neither. Bits 2-7 are reserved and MUST be zero
+- `flags` (byte 1): uint8 - bit 0 is set on a cancel message (defined below) and bit 1 on an announce message; a part sets neither. Bits 2-7 are reserved and MUST be zero
 - `timestamp` (announce, bytes 2-9): big-endian int64 - server clock time in microseconds when the image should be displayed by the device
 - `total_size` (announce, bytes 10-13): big-endian uint32 - size in bytes of the encoded image
 - `data` (part, rest of bytes): the next bytes of the encoded image
@@ -1754,7 +1754,7 @@ The timestamp indicates when this artwork should be displayed. Per channel, clie
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty image for that channel: an announce with `total_size` `0`. An empty image follows the same rules as any other image: a future timestamp schedules the clear.
 
-**Cancel message:** A message consisting of only the `type` and `flags` bytes, with bit 1 set. It discards the channel's pending image, taking effect immediately; the current image is unaffected.
+**Cancel message:** A message consisting of only the `type` and `flags` bytes, with bit 0 set. It discards the channel's pending image, taking effect immediately; the current image is unaffected.
 
 **Malformed sequences** are protocol errors; the client MUST close the connection. They are: a message shorter than 2 bytes or exceeding the size cap above, an announce whose length is not 14 bytes, an announce received while a transfer is in flight, a cancel message longer than 2 bytes, a part received with no transfer in flight or on a channel other than the in-flight transfer's, a part whose `data` would extend past `total_size`, a nonzero reserved flag bit, and a message with bit 0 and bit 1 both set.
 
