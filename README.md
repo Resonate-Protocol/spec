@@ -1724,7 +1724,7 @@ The `channels` array covers every channel index the client declared in [`artwork
 
 Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source`, `format`, `width`, and `height` MUST match the declaration.
 
-**Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change. If an image is also scheduled ahead for the channel, the server sends the current image first, then re-sends the scheduled one (in the other order, the current image would discard the schedule).
+**Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD promptly send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change. If an image is also scheduled ahead for the channel, the server sends the current image first, then re-sends the scheduled one (in the other order, the current image would discard the schedule).
 
 ### Server → Client: Artwork (Binary)
 
@@ -1746,11 +1746,11 @@ The fields are:
 - `total_size` (announce, bytes 10-13): big-endian uint32 - size in bytes of the encoded image
 - `data` (part, rest of bytes): the next bytes of the encoded image
 
-The concatenated `data` of all parts is the encoded image; the transfer is complete when the received data reaches `total_size`. An announce with `total_size` `0` completes immediately, with no parts. An artwork message, after the type byte, MUST NOT exceed 65518 bytes, so that it fits in a single Noise transport message without [fragmentation](#fragmentation).
+The concatenated `data` of all parts is the encoded image; the transfer is complete when the received data reaches `total_size`. An announce with `total_size` `0` completes immediately, with no parts. An artwork message MUST NOT exceed 65519 bytes, so that it fits in a single Noise transport message without [fragmentation](#fragmentation).
 
 At most one image transfer is in flight at a time across all of the role's channels: a transfer is in flight from its announce until it completes or its partly received image is discarded. The server MUST NOT announce an image, on any channel, while a transfer is in flight; to replace an image still in flight, it cancels that transfer first. Any other messages MAY be sent between the messages of a transfer.
 
-The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**: the most recently announced image, from its announce until it becomes current. An announce discards any held pending image. The pending image becomes current once its transfer is complete and its timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), has been reached; artwork is never dropped for lateness. Clients MAY ease into a complete pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends the image if it still applies.
+The timestamp indicates when this artwork should be displayed. Per channel, clients keep the **current image**, which is always what the channel shows, plus at most one **pending image**: the most recently announced image, from its announce until it becomes current. An announce discards that channel's pending image. The pending image becomes current once its transfer is complete and its timestamp, translated to the local clock via the [time filter](#clock-synchronization) (current best estimate, no waiting for convergence), has been reached; artwork is never dropped for lateness. Clients MAY ease into a complete pending image around its timestamp (e.g. a cross-fade) or show it early (e.g. a coming-up display). On [`stream/end`](#server--client-streamend), clearing buffers includes discarding pending images. A [`stream/start`](#server--client-streamstart) that changes a channel's configuration likewise discards that channel's pending image, and the server re-sends the image if it still applies.
 
 **Clearing artwork:** To clear the currently displayed artwork on a specific channel, the server sends an empty image for that channel: an announce with `total_size` `0`. An empty image follows the same rules as any other image: a future timestamp schedules the clear.
 
@@ -1760,7 +1760,7 @@ The timestamp indicates when this artwork should be displayed. Per channel, clie
 
 #### Server rules for scheduled artwork
 
-Servers SHOULD NOT send a scheduled image more than 20 seconds before its timestamp.
+Servers SHOULD NOT send a scheduled image announce message more than 20 seconds before its timestamp.
 
 To cancel a scheduled image, send a cancel message. A new future-timestamped image replaces the scheduled image rather than queueing behind it; to show two images in sequence, send the second only after the first's timestamp has passed on the server's clock.
 
