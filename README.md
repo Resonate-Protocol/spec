@@ -56,8 +56,8 @@ sequenceDiagram
         end
     end
 
-    alt Player requests format change
-        Client->>Server: stream/request-format (codec, sample_rate, etc)
+    alt Player changes preferred format
+        Client->>Server: client/state (player: format)
         Server->>Client: stream/start (player: new format)
     end
 
@@ -485,7 +485,6 @@ Players that can output audio should have the role `player`.
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](#client--server-clienthello-playerv1-support-object))
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
-- `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). An implemented method that is [disabled](#server--client-managementset-pairing-config) is omitted.
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
@@ -565,6 +564,8 @@ Every message MUST carry `available` and the full state of each role object it i
   - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](#client--server-clientstate-source-object))
+- `artwork?`: object - only if client has `artwork` role ([see artwork state object details](#client--server-clientstate-artwork-object))
+- `visualizer?`: object - only if client has `visualizer` role ([see visualizer state object details](#client--server-clientstate-visualizer-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -644,6 +645,10 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 The server MUST NOT send `stream/start` to a client that is not [`available`](#client--server-clientstate) (e.g. a client whose output is taken by an [external source](#external-source-handling)).
 
+Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role is added or re-added to `active_roles`, the server SHOULD wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
+
+**Note:** Clients may change their stream-configuration fields to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+
 ### Server → Client: `stream/clear`
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
@@ -652,22 +657,6 @@ Instructs clients to clear buffers without ending the stream. Used for seek oper
 - `roles?`: string[] - which roles to clear: '[player](#server--client-streamclear-player)', '[visualizer](#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 [Application-specific roles](#application-specific-roles) may also be included in this array (names starting with `_`).
-
-### Client → Server: `stream/request-format`
-
-Request different stream format (upgrade or downgrade). Available for clients with the `player`, `artwork`, or `visualizer` role.
-
-- `player?`: object - only for clients with the `player` role ([see player object details](#client--server-streamrequest-format-player-object))
-- `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](#client--server-streamrequest-format-artwork-object))
-- `visualizer?`: object - only for clients with the `visualizer` role ([see visualizer object details](#client--server-streamrequest-format-visualizer-object))
-
-[Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
-
-Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new configuration. If the server cannot honor the request, the stream continues in a configuration the client supports, and the server MUST NOT treat the request as an error.
-
-Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
-
-**Note:** Clients can use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
@@ -1304,7 +1293,7 @@ A secret set via [`set-pairing-config`](#server--client-managementset-pairing-co
 The object always carries `free`; `capacity` and the costs appear additionally on [`list-records`](#server--client-managementlist-records) and [`get-pairing-config`](#server--client-managementget-pairing-config) results.
 
 ## Player messages
-This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can request different audio formats based on their capabilities and current conditions.
+This section describes messages specific to clients with the `player` role, which handle audio output and synchronized playback. Player clients receive timestamped audio data, manage their own volume and mute state, and can change their preferred audio format based on their capabilities and current conditions.
 
 Volume values (0-100) represent perceived loudness, not linear amplitude (e.g., volume 50 should be perceived as half as loud as volume 100). Clients SHOULD convert volume to a linear amplitude (the gain applied to samples, where 1.0 is full scale and 0 is silent) as `amplitude = (volume / 100)^1.5`. To avoid audible clicks, clients SHOULD apply volume changes over a short ramp.
 
@@ -1325,7 +1314,7 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
 
 Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
-For the initial [`stream/start`](#server--client-streamstart) the server SHOULD select the highest-priority `supported_formats` entry it can produce for the current track. It MAY select a lower-priority entry when warranted, for example to match a track's native sample rate and avoid resampling, and MAY switch formats on a later track by sending a new `stream/start`.
+For each [`stream/start`](#server--client-streamstart) the server SHOULD select the [`format`](#client--server-clientstate-player-object) the player's state currently prefers when one is set and the server can produce it for the current track, and otherwise the highest-priority `supported_formats` entry it can produce. It MAY select a different entry when warranted, for example to match a track's native sample rate and avoid resampling or to apply an operator-configured format, and MAY switch formats on a later track by sending a new `stream/start`.
 
 [`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players SHOULD report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Players SHOULD factor expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients) into both values, and MUST NOT include `output_delay_ms` in either; the server applies `output_delay_ms` separately when calculating send-ahead.
 
@@ -1363,6 +1352,11 @@ State updates must be sent whenever any state changes, including when the volume
   - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
   - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
   - `supported_commands`: string[] - subset of: 'set_output_delay', empty when the player accepts no commands
+  - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference: the server selects per the `supported_formats` priority order
+    - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
+    - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
+    - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
+    - `bit_depth`: integer - bit depth (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
 
 **Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients must persist `output_delay_ms` locally across reboots and server reconnections. Clients may update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
@@ -1372,21 +1366,7 @@ State updates must be sent whenever any state changes, including when the volume
 
 **Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the time filter's server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
-### Client → Server: `stream/request-format` player object
-
-The `player` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
-
-- `player`: object
-  - `codec?`: 'opus' | 'flac' | 'pcm' - requested codec identifier
-  - `channels?`: integer - requested number of channels (e.g., 1 = mono, 2 = stereo)
-  - `sample_rate?`: integer - requested sample rate in Hz (e.g., 44100, 48000)
-  - `bit_depth?`: integer - requested bit depth (e.g., 16, 24)
-
-The requested format MUST be one the client listed in its [`supported_formats`](#client--server-clienthello-playerv1-support-object).
-
-Response when a `player` stream is active: [`stream/start`](#server--client-streamstart) with the new format.
-
-**Note:** Clients can use this message to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+**Format preference:** When `format` changes while a `player` stream is active, the server re-derives the stream format and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the preference applies to the next stream the server starts (see [`stream/start`](#server--client-streamstart)). Clients can use this to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `server/command` player object
 
@@ -1720,39 +1700,28 @@ This section describes messages specific to clients with the `artwork` role, whi
 
 **Channels:** Artwork clients can support 1-4 independent channels, allowing them to display multiple related images. For example, a device could display album artwork on one channel while simultaneously showing artist photos or background images on other channels. Each channel operates independently with its own format, resolution, and source type (album or artist artwork).
 
-### Client → Server: `client/hello` artwork@v1 support object
+### Client → Server: `client/state` artwork object
 
-The `artwork@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
+The `artwork` object in [`client/state`](#client--server-clientstate) has this structure:
 
-- `artwork@v1_support`: object
-  - `channels`: object[] - list of supported artwork channels (length 1-4), array index is the channel number
+- `artwork`: object
+  - `channels`: object[] - configuration the client wants for each artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' - image format identifier
-    - `width`: integer - width in pixels of the delivered image
-    - `height`: integer - height in pixels of the delivered image
+    - `format?`: 'jpeg' | 'png' - image format identifier. Required unless `source` is `'none'`
+    - `width?`: integer - width in pixels of the delivered image. Required unless `source` is `'none'`
+    - `height?`: integer - height in pixels of the delivered image. Required unless `source` is `'none'`
 
-The server MUST deliver each image at exactly the `width` by `height` declared for the channel. It MUST scale the source image to fit within those dimensions preserving its aspect ratio, MUST pad the remaining area with black, and MUST NOT crop the image.
+The `channels` array is positional from channel 0 (length 1-4). A channel index the array does not cover is `source: 'none'`, so a client MAY truncate the array after its last active channel. An `artwork` object whose `channels` array is longer than 4 is a protocol error; the server should close the connection.
 
-**Note:** Clients can support 1-4 independent artwork channels depending on their display capabilities. The channel number is determined by array position: `channels[0]` is channel 0 (binary message type 8), `channels[1]` is channel 1 (binary message type 9), etc.
-
-**None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly through [`stream/request-format`](#client--server-streamrequest-format-artwork-object) without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
+**Note:** Clients can use 1-4 independent artwork channels depending on their display capabilities. Channel 0 uses binary message type 8, channel 1 uses type 9, etc.
 
 Servers MUST support 'jpeg' and 'png'.
 
-### Client → Server: `stream/request-format` artwork object
+The server MUST deliver each image at exactly the `width` by `height` declared for the channel. It MUST scale the source image to fit within those dimensions preserving its aspect ratio, MUST pad the remaining area with black, and MUST NOT crop the image.
 
-The `artwork` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
+When a channel's configuration changes while an `artwork` stream is active, the server responds with a [`stream/start`](#server--client-streamstart) carrying the new configuration, followed by immediate artwork updates through binary messages.
 
-Request the server to change the artwork format for a specific channel. The client can send multiple `stream/request-format` messages to change formats on different channels.
-
-Response when an `artwork` stream is active: [`stream/start`](#server--client-streamstart) with the new format, followed by immediate artwork updates through binary messages.
-
-- `artwork`: object
-  - `channel`: integer - channel number (0-3) corresponding to the channel index declared in the artwork [`client/hello`](#client--server-clienthello-artworkv1-support-object)
-  - `source?`: 'album' | 'artist' | 'none' - artwork source type
-  - `format?`: 'jpeg' | 'png' - requested image format identifier
-  - `width?`: integer - requested width in pixels
-  - `height?`: integer - requested height in pixels
+**None source:** If a channel has `source` set to `none`, the server will not send any artwork data for that channel. This allows clients to disable and enable specific channels on the fly without needing to re-establish the WebSocket connection (useful for dynamic display layouts).
 
 ### Server → Client: `stream/start` artwork object
 
@@ -1761,13 +1730,13 @@ The `artwork` object in [`stream/start`](#server--client-streamstart) has this s
 - `artwork`: object
   - `channels`: object[] - configuration for each artwork channel, array index is the channel number
     - `source`: 'album' | 'artist' | 'none' - artwork source type
-    - `format`: 'jpeg' | 'png' - format of the encoded image
-    - `width`: integer - width in pixels of the encoded image
-    - `height`: integer - height in pixels of the encoded image
+    - `format?`: 'jpeg' | 'png' - format of the encoded image. Required unless `source` is `'none'`
+    - `width?`: integer - width in pixels of the encoded image. Required unless `source` is `'none'`
+    - `height?`: integer - height in pixels of the encoded image. Required unless `source` is `'none'`
 
-The `channels` array covers every channel index the client declared in [`artwork@v1_support`](#client--server-clienthello-artworkv1-support-object) in the same order. A channel the server is not streaming is represented as `source: 'none'`.
+The `channels` array is positional from channel 0 and never longer than 4. A channel the array does not cover, or whose `source` is `'none'`, is not streamed; the server SHOULD truncate the array after the last streamed channel.
 
-Each channel's configuration MUST match the client's current capability for that channel: the [`client/hello`](#client--server-clienthello-artworkv1-support-object) declaration, as later modified by the [`stream/request-format`](#client--server-streamrequest-format-artwork-object) changes the server honored. The `source`, `format`, `width`, and `height` MUST match the declaration.
+Each channel's configuration MUST match the channel's current [`client/state`](#client--server-clientstate-artwork-object) artwork declaration, a channel the state array does not cover counting as `source: 'none'`.
 
 **Late join:** After an artwork `stream/start` (initial or after a reconnection), the server SHOULD immediately send the current image for each channel whose `source` is not `'none'`, so a client joining mid-track does not stay blank until the next track change. If an image is also scheduled ahead for the channel, the server sends the current image first, then re-sends the scheduled one (in the other order, the current image would discard the schedule).
 
@@ -1807,8 +1776,16 @@ Each visualizer binary message carries exactly one frame. The server emits messa
 The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `visualizer@v1_support`: object
-  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'
   - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting each message's full wire size (message-type byte + timestamp + data)
+
+The requested data types, frame-rate cap, and spectrum configuration are dynamic and reported in the [`client/state`](#client--server-clientstate-visualizer-object) visualizer object.
+
+### Client → Server: `client/state` visualizer object
+
+The `visualizer` object in [`client/state`](#client--server-clientstate) has this structure:
+
+- `visualizer`: object
+  - `types`: string[] - visualization data types requested by the client: 'beat', 'loudness', 'f_peak', 'peak', 'spectrum'
   - `rate_max`: integer - maximum periodic visualization frames per second (applies to `loudness`, `f_peak`, `spectrum`). Beat events are not throttled and are bounded by tempo. Clients should set this to their display refresh rate
   - `spectrum?`: object - spectrum configuration, required if `types` includes 'spectrum'
     - `n_disp_bins`: integer - number of display bins (i.e. bars on a graphical equalizer)
@@ -1816,12 +1793,14 @@ The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthel
     - `f_min`: integer - lowest frequency in Hz to bin
     - `f_max`: integer - highest frequency in Hz to bin
 
+When this configuration changes while a `visualizer` stream is active, the server re-derives the stream configuration and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the configuration applies to the next stream the server starts.
+
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
 
 - `visualizer`: object
-  - `types`: string[] - visualization data types the server will stream. MUST be a subset of the types the client requested (in [`client/hello`](#client--server-clienthello-visualizerv1-support-object) or the latest [`stream/request-format`](#client--server-streamrequest-format-visualizer-object))
+  - `types`: string[] - visualization data types the server will stream. MUST be a subset of the types the client requested in its current [`client/state`](#client--server-clientstate-visualizer-object)
   - `rate_max`: integer - periodic frames per second the server will emit. MUST NOT exceed the client's requested `rate_max`
   - `tracks_downbeats`: boolean - only if `types` includes 'beat'. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
   - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'. MUST match the client's current requested configuration
@@ -1829,19 +1808,6 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
     - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
     - `f_min`: integer - lowest frequency in Hz
     - `f_max`: integer - highest frequency in Hz
-
-### Client → Server: `stream/request-format` visualizer object
-
-The `visualizer` object in [`stream/request-format`](#client--server-streamrequest-format) has this structure:
-
-- `visualizer`: object
-  - `types?`: string[] - new set of visualization data types
-  - `rate_max?`: integer - new periodic frames-per-second cap
-  - `spectrum?`: object - new spectrum configuration ([see spectrum object details](#client--server-clienthello-visualizerv1-support-object))
-
-All fields are optional; omitted fields keep their current value.
-
-Response when a `visualizer` stream is active: [`stream/start`](#server--client-streamstart) with the new visualizer configuration.
 
 ### Server → Client: `stream/clear` visualizer
 
