@@ -97,7 +97,7 @@ SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO
 
 ### Dynamic Pairing Code Flow
 
-Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides. An attempt is gesture-gated only when the method is [escalated](#failure-counter) (see [Pairing Window](#pairing-window)).
+Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides. An attempt is delayed only while the method is in [backoff](#failure-counter).
 
 ```mermaid
 sequenceDiagram
@@ -110,9 +110,9 @@ sequenceDiagram
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic pairing code
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code})
-    opt gesture-gated attempt, no window open
+    opt method in backoff
         Client->>Server: client/pair-pending
-        Note over Client: Operator opens pairing window
+        Note over Client: Backoff period elapses
     end
     Client->>Server: client/pair-init (commit_B)
     opt digits attempt, speaker client
@@ -177,12 +177,12 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 #### Failure counter
 
-Brute-force protection for the Dynamic Pairing Code Flow is built around a failure counter that escalates the method to gesture-gating (see [Pairing Window](#pairing-window)). The following rules are mandatory for clients implementing `dynamic_pairing_code`:
+Brute-force protection for the Dynamic Pairing Code Flow is built around a failure counter that puts the method into a time-based **backoff**. The following rules are mandatory for clients implementing `dynamic_pairing_code`:
 
-- **Counter.** The client maintains a single failure counter for the method, persisted across reboots. It is not partitioned by `server_id` or source IP.
+- **Counter.** The client maintains a single failure counter for the method. It is not partitioned by `server_id` or source IP, and does not persist across reboots.
 - **Increment.** The counter increments when the client starts emitting the pairing code, at most once per attempt. No other event increments it.
 - **Reset.** The counter resets to zero when the client's verification of `server_kc` succeeds, whether or not the attempt finalizes.
-- **Escalation.** When the counter reaches **5**, the method is **escalated**: every subsequent attempt is gesture-gated until a reset de-escalates it. Escalation is not an error state - the method stays offered.
+- **Backoff.** While the counter is **5** or higher, the method is in **backoff**: the client withholds [`client/pair-init`](#client--server-clientpair-init), signaling [`client/pair-pending`](#client--server-clientpair-pending), until a cooldown has elapsed since the last increment. Recommended cooldown: 1 minute when the counter reaches 5, doubling with each further failure, capped at 15 minutes. Backoff is not an error state - the method stays offered.
 
 ### Static Pairing Code Flow
 
@@ -255,17 +255,14 @@ A decoder MUST reject malformed input, including a payload shorter than its vers
 
 ### Pairing Window
 
-Code-based pairing gates some attempts on a **pairing window**: a state in which the client has decided to accept one pairing attempt. The window admits exactly one attempt and closes on completion, inner-authentication failure, [`pair/abort`](#client--server-pairabort), drop of the connection carrying its attempt, operator cancellation, window-lifetime expiry, or attempt-timeout expiry.
+The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts and closes on a completed pairing, its fifth inner-authentication failure, drop of the connection carrying its attempts, operator cancellation, or window-lifetime expiry. An aborted or timed-out attempt only ends that attempt; the window stays open for another.
 
-An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - per the selected method's policy:
-
-- `static_pairing_code` - every attempt.
-- `dynamic_pairing_code` - only when the method is [escalated](#failure-counter).
+An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt. Dynamic Pairing Code attempts are never gesture-gated; their brute-force protection is the [failure counter's backoff](#failure-counter).
 
 Pairing Window mechanics:
 
 - **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
-- **Window lifetime.** From window opening until [`client/pair-init`](#client--server-clientpair-init) is sent. Recommended 5 minutes. On expiry, the window closes silently.
+- **Window lifetime.** From window opening. Recommended 5 minutes. On expiry, the window closes silently; an attempt already in progress runs to its own end.
 - **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](messaging.md#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
 
 ### PAKE
@@ -334,13 +331,13 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 
 #### Client → Server: `client/pair-pending`
 
-Reports that the selected attempt is gesture-gated and no [pairing window](#pairing-window) is open. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once a window opens. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending gesture to the operator.
+Reports that the client is not yet ready to start the selected attempt: no [pairing window](#pairing-window) is open (static pairing code), or the method is in [backoff](#failure-counter) (dynamic pairing code). Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once a window opens or the backoff elapses. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator.
 
 - `pairing_index`: integer - see [Pairing index](#messages)
 
 #### Client → Server: `client/pair-init`
 
-Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and - when the attempt is gesture-gated (see [Pairing Window](#pairing-window)) - a window is open; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) and the [digit audio clips](#server--client-digit-audio-clip-binary) (dynamic pairing code) before receiving this message.
+Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and the client is ready: for `static_pairing_code`, a [pairing window](#pairing-window) is open; for `dynamic_pairing_code`, any [backoff](#failure-counter) has elapsed; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) and the [digit audio clips](#server--client-digit-audio-clip-binary) (dynamic pairing code) before receiving this message.
 
 - `pairing_index`: integer - see [Pairing index](#messages); only a match starts the attempt
 - `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in the [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow); absent in the [Static Pairing Code Flow](#static-pairing-code-flow).
