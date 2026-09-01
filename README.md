@@ -477,7 +477,7 @@ Players that can output audio should have the role `player`.
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](#client--server-clienthello-sourcev1-support-object))
 - `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](#client--server-clienthello-visualizerv1-support-object))
-- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). Every client implements at least the Pairing PSK method (see [Pairing](#pairing)).
+- `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method (see [Pairing](#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](#unpaired-access)
   - `enabled`: boolean
 
