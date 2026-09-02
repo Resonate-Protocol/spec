@@ -16,6 +16,8 @@ The client reveals the new long-term PSK only after `server_kc` verifies, and on
 
 Static pairing methods (Pairing PSK, Static Pairing Code) do not take over the device's out-channel. Dynamic pairing (Dynamic Pairing Code) takes over the out-channel - typically the audio output or display - to emit the per-session pairing code, so it cannot run while audio is playing on the same device; the operator must stop playback before initiating pairing (see [Multiple servers](connection.md#multiple-servers-server-initiated)).
 
+Clients with a usable out-channel (display, speaker, etc.) should offer `dynamic_pairing_code` rather than `static_pairing_code`, which is intended for devices without one. Clients whose display can render a QR code should also offer the `qr_code` [emission format](#dynamic-pairing-code-flow).
+
 ### Pairing Records
 
 Each successful pairing produces a pairing record: the new [long-term PSK](README.md#definitions) persisted together with the server's `server_id`. The client MUST persist the new record, replacing any record it already holds for the server.
