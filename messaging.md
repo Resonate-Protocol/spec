@@ -258,7 +258,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, the client MUST send an update that includes that role's object.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). When a role becomes active in `active_roles`, the client MUST send an update that includes that role's object. The server MUST NOT send a role's binary data until it has received that object. For a role that defines no state object, the client's initial `client/state` opens its binary data instead.
 
 A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
