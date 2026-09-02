@@ -57,8 +57,8 @@ sequenceDiagram
         end
     end
 
-    alt Player requests format change
-        Client->>Server: stream/request-format (codec, sample_rate, etc)
+    alt Player changes preferred format
+        Client->>Server: client/state (player: format)
         Server->>Client: stream/start (player: new format)
     end
 
@@ -142,7 +142,6 @@ Their binary message IDs come from the unmanaged 192-255 range: an application-s
 <!-- include: connection.md -->
 <!-- include: messaging.md -->
 <!-- include: pairing.md -->
-<!-- include: management.md -->
 <!-- include: roles/player/v1.md -->
 <!-- include: roles/source/v1.md -->
 <!-- include: roles/controller/v1.md -->
