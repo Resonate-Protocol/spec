@@ -38,7 +38,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt is not an inner-authentication failure. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
 
 ### Unpaired Access
 
@@ -97,7 +97,7 @@ SP:0AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP6BYPC4PSOLZXH5DU6V97M5XXO
 
 ### Dynamic Pairing Code Flow
 
-Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides. An attempt is delayed only while the method is in [backoff](#failure-counter).
+Pairing with a per-session pairing code derived from the Noise handshake and emitted by the client via its out-channel, in one of two **emission formats** (the activation's [`format`](messaging.md#server--client-serveractivate)): `digits` - a decimal code the operator types into the server - or `qr_code` - a code rendered as a QR code that the operator scans into the server. Either way, a [PAKE](#pake) round authenticates both sides.
 
 ```mermaid
 sequenceDiagram
@@ -110,10 +110,6 @@ sequenceDiagram
     Client->>Server: client/hello (supported_pair_methods)
     Note over Server: Operator picks dynamic pairing code
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code})
-    opt method in backoff
-        Client->>Server: client/pair-pending
-        Note over Client: Backoff period elapses
-    end
     Client->>Server: client/pair-init (commit_B)
     opt digits attempt, speaker client
         Server->>Client: digit audio clip (binary), one per digit 0-9
@@ -174,15 +170,6 @@ SP:14DQ6FY7E4XTOP9HJ5LV6Z3PO57YPD4XT6T97N5Y
 3. `derived_code(h, nonce_A, nonce_B) == code_entered`
 
 A failed key confirmation results in [`pair/abort`](#client--server-pairabort) with reason `pairing_code_mismatch`. A `wrapped_nonce_B` that fails to decrypt, a recovered `nonce_B` that does not match `commit_B`, or an entered code that fails the binding check is a [protocol error](#protocol-errors). Any failure discards the received `wrapped_psk`. Only when all three checks pass does the server process [`client/pair-finalize`](#client--server-clientpair-finalize), [unwrapping](#wrapping) the PSK.
-
-#### Failure counter
-
-Brute-force protection for the Dynamic Pairing Code Flow is built around a failure counter that puts the method into a time-based **backoff**. The following rules are mandatory for clients implementing `dynamic_pairing_code`:
-
-- **Counter.** The client maintains a single failure counter for the method. It is not partitioned by `server_id` or source IP, and does not persist across reboots.
-- **Increment.** The counter increments when the client starts emitting the pairing code, at most once per attempt. No other event increments it.
-- **Reset.** The counter resets to zero when the client's verification of `server_kc` succeeds, whether or not the attempt finalizes.
-- **Backoff.** While the counter is **5** or higher, the method is in **backoff**: the client withholds [`client/pair-init`](#client--server-clientpair-init), signaling [`client/pair-pending`](#client--server-clientpair-pending), until a cooldown has elapsed since the last increment. Recommended cooldown: 1 minute when the counter reaches 5, doubling with each further failure, capped at 15 minutes. Backoff is not an error state - the method stays offered.
 
 ### Static Pairing Code Flow
 
@@ -255,9 +242,9 @@ A decoder MUST reject malformed input, including a payload shorter than its vers
 
 ### Pairing Window
 
-The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts and closes on a completed pairing, its fifth inner-authentication failure, drop of the connection carrying its attempts, operator cancellation, or window-lifetime expiry. An aborted or timed-out attempt only ends that attempt; the window stays open for another.
+The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts and closes on a completed pairing, its fifth failed attempt (the client's verification of `server_kc` fails), drop of the connection carrying its attempts, operator cancellation, or window-lifetime expiry. An aborted or timed-out attempt only ends that attempt; the window stays open for another.
 
-An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt. Dynamic Pairing Code attempts are never gesture-gated; their brute-force protection is the [failure counter's backoff](#failure-counter).
+An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt. Dynamic Pairing Code attempts are never gesture-gated.
 
 Pairing Window mechanics:
 
@@ -331,13 +318,13 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 
 #### Client → Server: `client/pair-pending`
 
-Reports that the client is not yet ready to start the selected attempt: no [pairing window](#pairing-window) is open (static pairing code), or the method is in [backoff](#failure-counter) (dynamic pairing code). Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once a window opens or the backoff elapses. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator.
+Reports that no [pairing window](#pairing-window) is open for the selected static-pairing-code attempt. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once a window opens. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator.
 
 - `pairing_index`: integer - see [Pairing index](#messages)
 
 #### Client → Server: `client/pair-init`
 
-Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and the client is ready: for `static_pairing_code`, a [pairing window](#pairing-window) is open; for `dynamic_pairing_code`, any [backoff](#failure-counter) has elapsed; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) and the [digit audio clips](#server--client-digit-audio-clip-binary) (dynamic pairing code) before receiving this message.
+Starts the code-based pairing [attempt](#entering-and-leaving-pairing). Sent once the pairing [`server/activate`](messaging.md#server--client-serveractivate) has arrived and - for `static_pairing_code` - a [pairing window](#pairing-window) is open; otherwise immediately. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) (static pairing code) or [`server/pair-init`](#server--client-serverpair-init) and the [digit audio clips](#server--client-digit-audio-clip-binary) (dynamic pairing code) before receiving this message.
 
 - `pairing_index`: integer - see [Pairing index](#messages); only a match starts the attempt
 - `commit_B?`: string - `SHA-256("sendspin-pair-commit-v1" || nonce_B)` (32 bytes base64url-encoded, 43 chars). Required in the [Dynamic Pairing Code Flow](#dynamic-pairing-code-flow); absent in the [Static Pairing Code Flow](#static-pairing-code-flow).
