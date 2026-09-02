@@ -57,8 +57,8 @@ sequenceDiagram
         end
     end
 
-    alt Player requests format change
-        Client->>Server: stream/request-format (codec, sample_rate, etc)
+    alt Player changes preferred format
+        Client->>Server: client/state (player: format)
         Server->>Client: stream/start (player: new format)
     end
 

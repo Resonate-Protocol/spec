@@ -190,7 +190,6 @@ Players that can output audio should have the role `player`.
   - `color@v1` - receives colors derived from the current audio
 - `player@v1_support?`: object - required if `player@v1` is listed, absent otherwise ([see player@v1 support object details](roles/player/v1.md#client--server-clienthello-playerv1-support-object))
 - `source@v1_support?`: object - required if `source@v1` is listed, absent otherwise ([see source@v1 support object details](roles/source/v1.md#client--server-clienthello-sourcev1-support-object))
-- `artwork@v1_support?`: object - required if `artwork@v1` is listed, absent otherwise ([see artwork@v1 support object details](roles/artwork/v1.md#client--server-clienthello-artworkv1-support-object))
 - `visualizer@v1_support?`: object - required if `visualizer@v1` is listed, absent otherwise ([see visualizer@v1 support object details](roles/visualizer/v1.md#client--server-clienthello-visualizerv1-support-object))
 - `supported_pair_methods`: object - pairing methods this client currently offers, keyed by method identifier, each value a [pair-method descriptor](pairing.md#client--server-clienthello-pair-method-descriptor). Every client offers at least the Pairing PSK method (see [Pairing](pairing.md#pairing)).
 - `unpaired_access`: object - whether this client currently admits [unpaired access](pairing.md#unpaired-access)
@@ -259,7 +258,7 @@ For synchronization, all timing is relative to the server's monotonic clock. The
 
 Client sends state updates to the server. Contains client-level state and role-specific state objects.
 
-Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, send an update that includes that role's object.
+Sent once the client is ready to report its operational status (`available`), and whenever any state changes thereafter. A player reports `available: true` only after it has established [clock synchronization](#clock-synchronization). The server MUST NOT send binary data to a client before that client has sent its initial `client/state`. When a role becomes active in `active_roles`, the client MUST send an update that includes that role's object.
 
 A client whose `active_roles` are non-empty sends the initial `client/state` even when none of its roles defines a state object.
 
@@ -270,6 +269,8 @@ Every message MUST carry `available` and the full state of each role object it i
   - `false` - client's output is in use by an external system and is not currently participating in Sendspin playback with this server. See [External Source Handling](#external-source-handling)
 - `player?`: object - only if client has `player` role ([see player state object details](roles/player/v1.md#client--server-clientstate-player-object))
 - `source?`: object - only if client has `source` role ([see source state object details](roles/source/v1.md#client--server-clientstate-source-object))
+- `artwork?`: object - only if client has `artwork` role ([see artwork state object details](roles/artwork/v1.md#client--server-clientstate-artwork-object))
+- `visualizer?`: object - only if client has `visualizer` role ([see visualizer state object details](roles/visualizer/v1.md#client--server-clientstate-visualizer-object))
 
 [Application-specific roles](README.md#application-specific-roles) may also include objects in this message (keys starting with `_`).
 
@@ -349,6 +350,10 @@ Starts a stream for one or more roles. If sent for a role that already has an ac
 
 The server MUST NOT send `stream/start` to a client that is not [`available`](#client--server-clientstate) (e.g. a client whose output is taken by an [external source](#external-source-handling)).
 
+Each role's stream configuration is derived from what the client reports about itself: the role's support object in [`client/hello`](#client--server-clienthello) for constant capabilities, and the role's [`client/state`](#client--server-clientstate) object for the stream-configuration fields the client may change during the connection (each role may define both). After a role is added or re-added to `active_roles`, the server MUST wait for the [`client/state`](#client--server-clientstate) update the activation requires before starting that role's stream, so it does not start from stale state. When a `client/state` changes a role's stream-configuration fields while a stream is active for that role, the server re-derives the stream configuration and, if it changed, sends a `stream/start` with the new configuration. When no stream is active for the role, the server MUST NOT start one in response; the updated state applies to the next stream it starts for that role.
+
+**Note:** Clients may change their stream-configuration fields to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
+
 ### Server → Client: `stream/clear`
 
 Instructs clients to clear buffers without ending the stream. Used for seek operations and track jumps (switching to a different track without stopping the stream).
@@ -357,22 +362,6 @@ Instructs clients to clear buffers without ending the stream. Used for seek oper
 - `roles?`: string[] - which roles to clear: '[player](roles/player/v1.md#server--client-streamclear-player)', '[visualizer](roles/visualizer/v1.md#server--client-streamclear-visualizer)', or both. If omitted, clears both roles
 
 [Application-specific roles](README.md#application-specific-roles) may also be included in this array (names starting with `_`).
-
-### Client → Server: `stream/request-format`
-
-Request different stream format (upgrade or downgrade). Available for clients with the `player`, `artwork`, or `visualizer` role.
-
-- `player?`: object - only for clients with the `player` role ([see player object details](roles/player/v1.md#client--server-streamrequest-format-player-object))
-- `artwork?`: object - only for clients with the `artwork` role ([see artwork object details](roles/artwork/v1.md#client--server-streamrequest-format-artwork-object))
-- `visualizer?`: object - only for clients with the `visualizer` role ([see visualizer object details](roles/visualizer/v1.md#client--server-streamrequest-format-visualizer-object))
-
-[Application-specific roles](README.md#application-specific-roles) may also include objects in this message (keys starting with `_`).
-
-Response when a stream is active for the role: [`stream/start`](#server--client-streamstart) with the new configuration. If the server cannot honor the request, the stream continues in a configuration the client supports, and the server MUST NOT treat the request as an error.
-
-Response when no stream is active for the role: the server MUST NOT start a stream in response, but SHOULD remember the requested format to apply to the next stream it starts for that role.
-
-**Note:** Clients can use this message to adapt to changing network conditions, CPU constraints, or display requirements. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
 ### Server → Client: `stream/end`
 
