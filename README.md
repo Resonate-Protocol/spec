@@ -1147,22 +1147,10 @@ The `player@v1_support` object in [`client/hello`](#client--server-clienthello) 
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100)
     - `bit_depth`: integer - bit depth for this format (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
   - `buffer_capacity`: integer - max size in bytes of compressed audio messages in the buffer that are yet to be played
-  - `supported_commands`: string[] - subset of: 'volume', 'mute'
 
 Servers MUST support all audio codecs: 'opus', 'flac', and 'pcm'.
 
 For each [`stream/start`](#server--client-streamstart) the server SHOULD select the [`format`](#client--server-clientstate-player-object) the player's state currently prefers when one is set and the server can produce it for the current track, and otherwise the highest-priority `supported_formats` entry it can produce. It MAY select a different entry when warranted, for example to match a track's native sample rate and avoid resampling or to apply an operator-configured format, and MAY switch formats on a later track by sending a new `stream/start`.
-
-[`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players SHOULD report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Players SHOULD factor expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients) into both values, and MUST NOT include `output_delay_ms` in either; the server applies `output_delay_ms` separately when calculating send-ahead.
-
-**Server behavior:**
-- `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
-- For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
-- When the maximum decreases mid-stream (player leaves group, or updates timing), the server may keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
-- Especially for live streams, servers must schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
-- For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
-- `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
-- Servers may rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
 
 **PCM Encoding Convention:** For the `pcm` codec, samples are encoded as little-endian signed integers (two's complement). 24-bit samples are packed as 3 bytes per sample.
 
@@ -1183,17 +1171,19 @@ Informs the server of player-specific state changes. Only for clients with the `
 State updates must be sent whenever any state changes, including when the volume was changed through a `server/command` or via device controls.
 
 - `player`: object
-  - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
-  - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object)
+  - `volume?`: integer - range 0-100, MUST be included if 'volume' is in `supported_commands`
+  - `muted?`: boolean - mute state, MUST be included if 'mute' is in `supported_commands`
   - `output_delay_ms`: integer - output delay in milliseconds (0-5000)
-  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)).
+  - `required_lead_time_ms`: integer - minimum startup lead time in milliseconds (e.g., codec init, decode warmup, audio backend buffering, DAC latency). Measured from the server transmit time of the start/restart trigger (the `server_transmitted` field in [`stream/start`](#server--client-streamstart) or [`stream/clear`](#server--client-streamclear)) to the playback timestamp of the first audio chunk that can be played in full. The server treats this as a hint and MAY give less lead (see [Server Audio Send Constraints](#server-audio-send-constraints)).
   - `min_buffer_ms`: integer - requested minimum ongoing buffer duration in milliseconds during playback (primarily for live streams), used to absorb network jitter and ongoing decode/playback timing variance. See [Measuring timing parameters](#client--server-clientstate-player-object).
-  - `supported_commands`: string[] - subset of: 'set_output_delay', empty when the player accepts no commands
+  - `supported_commands`: string[] - subset of: 'volume', 'mute', 'set_output_delay', empty when the player accepts no commands
   - `format?`: object - the format the player currently prefers, which MUST be one of the entries in [`supported_formats`](#client--server-clienthello-playerv1-support-object). Absent means no overridden preference: the server selects per the `supported_formats` priority order
     - `codec`: 'opus' | 'flac' | 'pcm' - codec identifier
     - `channels`: integer - number of channels (e.g., 1 = mono, 2 = stereo)
     - `sample_rate`: integer - sample rate in Hz (e.g., 44100, 48000)
     - `bit_depth`: integer - bit depth (e.g., 16, 24); meaningful for `pcm` and `flac` only, ignored for `opus`
+
+**Supported commands:** `supported_commands` advertises settability, not reportability. It lists the commands the server may send, and a player MAY report `volume` or `muted` without offering the matching command: an amplifier with a physical volume knob reports the position it is set to but cannot be set remotely. Capability also cannot be inferred from field presence, since `output_delay_ms` is never optional, whether or not `set_output_delay` is offered. A server MUST NOT treat a reported `volume` or `muted` as settable while the matching command is absent from `supported_commands`, though it MAY still surface the reported value as read-only.
 
 **Output delay:** The default is 0, meaning audio exits the device's audio port at the timestamp. `output_delay_ms` compensates for additional delay beyond the port (external speakers, amplifiers); it does not cover processing delays before the port (DAC latency, audio buffers), which the client compensates itself. Negative values are not supported and should never be required for any compliant implementation. Clients MUST clamp `output_delay_ms` to the range 0-5000. Clients must persist `output_delay_ms` locally across reboots and server reconnections. Clients may update `output_delay_ms` and `supported_commands` when audio output changes (e.g., external speaker connected), persisting separate delays per output.
 
@@ -1212,10 +1202,12 @@ The `player` object in [`server/command`](#server--client-servercommand) has thi
 Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
-  - `command`: 'volume' | 'mute' | 'set_output_delay' - must be listed in `supported_commands` from [`player@v1_support`](#client--server-clienthello-playerv1-support-object) or from [`client/state`](#client--server-clientstate-player-object); unlisted commands are ignored by the client
+  - `command`: 'volume' | 'mute' | 'set_output_delay' - must be listed in `supported_commands` from [`client/state`](#client--server-clientstate-player-object); unlisted commands are ignored by the client
   - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
   - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
   - `output_delay_ms?`: integer - delay in milliseconds (0-5000), only set if `command` is `set_output_delay`
+
+The server MUST NOT send a player command to a client before that client has sent its initial [`client/state`](#client--server-clientstate).
 
 ### Server → Client: `stream/start` player object
 
@@ -1275,10 +1267,19 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 ### Server Audio Send Constraints
 
+[`required_lead_time_ms`](#client--server-clientstate-player-object) and [`min_buffer_ms`](#client--server-clientstate-player-object) are reported via [`client/state`](#client--server-clientstate-player-object). Players SHOULD report the lowest values that reliably prevent buffer underruns and start-of-stream truncation under expected conditions, to ensure the lowest possible latency for real-time applications. Players SHOULD factor expected network delay/jitter (small on LAN/Wi-Fi, larger for remote or high-latency clients) into both values, and MUST NOT include `output_delay_ms` in either; the server applies `output_delay_ms` separately when calculating send-ahead.
+
 - **Chunk duration bounds:** A server MUST NOT send an audio chunk longer than 150 ms, and SHOULD NOT send one shorter than 15 ms (the final chunk of a stream or the chunk before a format change MAY be shorter).
 - The server sends audio to late-joining clients with future timestamps only, allowing them to buffer and start playback in sync with existing clients.
-- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead (see [Server behavior](#client--server-clienthello-playerv1-support-object)). An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
+- After a [`stream/start`](#server--client-streamstart) that begins buffering from empty (a new stream, or the first after a [`stream/end`](#server--client-streamend)) or a [`stream/clear`](#server--client-streamclear), servers must schedule the first audio timestamp far enough in the future to satisfy each player's lead. An in-place `stream/start` configuration update on an active stream continues the existing timeline and does not re-apply the startup lead. For live streams the buffer cannot grow after playback begins, so the lead must already be reached before the first chunk plays.
 - Servers factor in each client's [`output_delay_ms`](#client--server-clientstate-player-object) when calculating how far ahead to send audio, keeping effective buffer headroom constant.
+- `required_lead_time_ms` is a hint that keeps the start of the stream from being cut off. The server schedules the first chunk at least `min_buffer_ms + output_delay_ms` ahead, and SHOULD extend the lead toward `required_lead_time_ms` only when doing so adds no latency, i.e. for buffered sources but not live streams.
+- For grouped playback, use a common send-ahead equal to the maximum per-player send-ahead across grouped players. Recompute when players join, leave, or update their timing parameters.
+- When the maximum decreases mid-stream (player leaves group, or updates timing), the server may keep the current send-ahead unchanged or reduce it toward the new maximum. The choice depends on implementation priorities (lowest latency vs. glitchless audio).
+- Especially for live streams, servers must schedule timestamps so each player's queued audio duration stays at or above its `min_buffer_ms`. `buffer_capacity` is a hard per-player byte cap and may reduce the effective queued duration below the requested `min_buffer_ms` when the negotiated codec's byte rate would otherwise exceed it.
+- For buffered streams, prefer filling each player's queue near `buffer_capacity` to maximize stability.
+- `buffer_capacity` is a hard per-player byte limit; servers should not send data that would cause a player's queued compressed audio to exceed this limit.
+- Servers may rate-limit, debounce, or coalesce a player's timing updates to prevent disruption from frequent or small changes.
 
 ### Suggested correction strategy
 
@@ -1437,9 +1438,9 @@ Control the group that's playing and switch groups. Only valid from clients with
 - 'seek' - seek to an absolute position. The client MUST include `position_ms`; the server MUST ignore the command if `position_ms` is outside the range 0 to `seek_max_ms`
 - 'seek_relative' - seek by an offset from the current position. The client MUST include `offset_ms`; the server applies it on a best-effort basis and MUST clamp the result to the seekable range
 
-**Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to preserve relative volume levels while achieving the requested volume as closely as player boundaries allow:
+**Setting group volume:** When setting group volume via the 'volume' command, the server applies the following algorithm to the players in the group that support the `volume` command, preserving relative volume levels while achieving the requested volume as closely as player boundaries allow. Players without volume support are excluded and receive no volume command:
 
-1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of all player volumes)
+1. Calculate the delta: `delta = requested_volume - current_group_volume` (where current group volume is the average of their volumes)
 2. Apply the delta to each player's volume
 3. Clamp any player volumes that exceed boundaries (0-100%)
 4. If any players were clamped:
@@ -1453,7 +1454,7 @@ The loop only computes the final per-player volumes; once it completes, the serv
 
 This ensures that when setting group volume to 100%, all players will reach 100% if possible, and the final group volume matches the requested volume as closely as player boundaries allow.
 
-**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to all players in the group. Group volume changes do not affect any player's `muted` state (see the [player role](#player-messages)).
+**Setting group mute:** When setting group mute via the 'mute' command, the server applies the mute state to each player in the group that supports the `mute` command. Group volume changes do not affect any player's `muted` state (see the [player role](#player-messages)).
 
 #### Switch command cycle
 
@@ -1480,9 +1481,9 @@ The `controller` object in [`server/state`](#server--client-serverstate) has thi
   - `shuffle`: boolean - shuffle mode enabled/disabled
   - `seek_max_ms?`: integer - maximum absolute position in milliseconds a 'seek' may target (e.g., the end of the current track). The server MUST include this when 'seek' is in `supported_commands`, and MUST omit 'seek' when the seekable range is unknown (e.g., live streams); 'seek_relative' MAY still be offered
 
-**Reading group volume:** Group volume is the average of the volumes of players in the group that support the `volume` command. Players without volume support are excluded from the calculation. If no player in the group supports `volume`, group volume is reported as 100 and `'volume'` is dropped from the controller `supported_commands`.
+**Reading group volume:** Group volume is the average of the volumes of players in the group that support the `volume` command. Players without volume support are excluded from the calculation. If no player in the group supports `volume`, group volume is reported as 100 and `'volume'` is dropped from the controller `supported_commands`. A player MAY change its [`supported_commands`](#client--server-clientstate-player-object) mid-session, so the server recomputes both the group volume and the controller `supported_commands` whenever a player's volume support changes.
 
-**Reading group mute:** Group mute is `true` only when all mute-supporting players in the group are muted. Players without mute support are excluded. If some supporting players are muted and others are not, group mute is `false`. If no player in the group supports `mute`, group mute is reported as `false` and `'mute'` is dropped from the controller `supported_commands`.
+**Reading group mute:** Group mute is `true` only when all mute-supporting players in the group are muted. Players without mute support are excluded. If some supporting players are muted and others are not, group mute is `false`. If no player in the group supports `mute`, group mute is reported as `false` and `'mute'` is dropped from the controller `supported_commands`. The server recomputes group mute and the controller `supported_commands` the same way when a player's mute support changes.
 
 ## Metadata messages
 This section describes messages specific to clients with the `metadata` role, which handle display of track information and playback progress. Metadata clients receive state updates with track details.
