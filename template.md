@@ -142,7 +142,6 @@ Their binary message IDs come from the unmanaged 192-255 range: an application-s
 <!-- include: connection.md -->
 <!-- include: messaging.md -->
 <!-- include: pairing.md -->
-<!-- include: management.md -->
 <!-- include: roles/player/v1.md -->
 <!-- include: roles/source/v1.md -->
 <!-- include: roles/controller/v1.md -->
