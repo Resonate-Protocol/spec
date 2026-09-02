@@ -1795,6 +1795,8 @@ The `visualizer` object in [`client/state`](#client--server-clientstate) has thi
 
 When this configuration changes while a `visualizer` stream is active, the server re-derives the stream configuration and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the configuration applies to the next stream the server starts.
 
+A `visualizer` object whose `types` include `'spectrum'` without a `spectrum` object is a protocol error; the server SHOULD close the connection.
+
 ### Server → Client: `stream/start` visualizer object
 
 The `visualizer` object in [`stream/start`](#server--client-streamstart) has this structure:
