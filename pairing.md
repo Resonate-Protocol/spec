@@ -112,7 +112,7 @@ sequenceDiagram
     Server->>Client: server/activate (activities=['pairing'], active_roles=[], pairing={method: dynamic_pairing_code})
     opt attempt held back
         Client->>Server: client/pair-pending
-        Note over Client: Cooldown elapses or operator acts on the device
+        Note over Client: Cooldown elapses or operator acts
     end
     Client->>Server: client/pair-init (commit_B)
     opt digits attempt, speaker client
@@ -177,7 +177,7 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 #### Failed attempts
 
-How a client limits failed attempts is implementation-defined, but clients SHOULD limit them at least as strictly as the recommended limit below, whether by holding attempts until an operator acts on the device or by a cooldown. An attempt counts as failed once the client has emitted the code and the attempt ends without a successful verification of `server_kc`; a successful verification resets the count. Recommended limit: after 5 consecutive failed attempts, hold further attempts until an operator acts on the device where the device has a suitable gesture, otherwise a cooldown of 1 minute before the next attempt, doubling with each further failure, capped at 15 minutes. A limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending).
+How a client limits failed attempts is implementation-defined, but clients SHOULD limit them at least as strictly as the recommended limit below, whether by holding attempts until a manufacturer-defined operator action, as for a [pairing window](#pairing-window), or by a cooldown. An attempt counts as failed once the client has emitted the code and the attempt ends without a successful verification of `server_kc`; a successful verification resets the count. Recommended limit: after 5 consecutive failed attempts, a cooldown of 1 minute before the next attempt, doubling with each further failure, capped at 15 minutes; where such an action is available, hold attempts from the tenth consecutive failure until it occurs. A limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending).
 
 ### Static Pairing Code Flow
 
@@ -329,8 +329,8 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or its [attempt limit](#failed-attempts) has not admitted it yet. Sent immediately on receiving such a pairing [`server/activate`](messaging.md#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)), which SHOULD outlast `retry_after_ms`.
 
 - `pairing_index`: integer - see [Pairing index](#messages)
-- `retry_after_ms?`: integer - the client will be ready in this many milliseconds without operator action; absent when an action on the device is needed
-- `message?`: string - a short plain-text sentence for the operator, such as what to do on the device, preferably in one of the server's [`languages`](messaging.md#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device and MUST NOT interpret markup or links in it
+- `retry_after_ms?`: integer - the client will be ready in this many milliseconds without operator action; absent when an operator action is needed
+- `message?`: string - a short plain-text sentence for the operator, such as what to do to proceed, preferably in one of the server's [`languages`](messaging.md#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device and MUST NOT interpret markup or links in it
 
 #### Client → Server: `client/pair-init`
 
