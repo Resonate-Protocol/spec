@@ -895,7 +895,7 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 #### Failed attempts
 
-How a client limits failed attempts is implementation-defined: it MAY hold attempts until an operator acts on the device, apply a cooldown after repeated failures, or both. Clients SHOULD apply some limit; a 6-digit code withstands guessing only as long as attempts cannot fail at wire speed. Recommended cooldown: after 5 consecutive failed attempts, counted from the code's emission and reset by a successful `server_kc` verification, 1 minute before the next attempt, doubling with each further failure, capped at 15 minutes. A limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending).
+How a client limits failed attempts is implementation-defined, but clients SHOULD limit them at least as strictly as the recommended limit below, whether by holding attempts until an operator acts on the device or by a cooldown. An attempt counts as failed once the client has emitted the code and the attempt ends without a successful verification of `server_kc`; a successful verification resets the count. Recommended limit: after 5 consecutive failed attempts, hold further attempts until an operator acts on the device where the device has a suitable gesture, otherwise a cooldown of 1 minute before the next attempt, doubling with each further failure, capped at 15 minutes. A limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending).
 
 ### Static Pairing Code Flow
 
@@ -968,15 +968,15 @@ A decoder MUST reject malformed input, including a payload shorter than its vers
 
 ### Pairing Window
 
-The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts and closes on a completed pairing, its fifth failed attempt (the client's verification of `server_kc` fails), drop of the connection carrying its attempts, operator cancellation, or window-lifetime expiry. An aborted or timed-out attempt only ends that attempt; the window stays open for another.
+The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts, all on the connection that carries its first, and closes on a completed pairing, its fifth failed attempt (the client's verification of `server_kc` fails), drop of that connection, operator cancellation, or window-lifetime expiry. An attempt that ends any other way - timed out or cancelled - only ends that attempt; the window stays open for another.
 
 An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt. Dynamic Pairing Code attempts are gated only by the client's [attempt limit](#failed-attempts).
 
 Pairing Window mechanics:
 
 - **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
-- **Window lifetime.** From window opening. Recommended 5 minutes. On expiry, the window closes silently; an attempt already in progress runs to its own end.
-- **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending). The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
+- **Window lifetime.** From window opening, paused while an attempt is in progress. Recommended 5 minutes. On expiry, the window closes silently.
+- **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending), optionally naming the gesture in `message`. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
 
 ### PAKE
 
