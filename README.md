@@ -756,7 +756,7 @@ The same `server/activate` can also end a pairing attempt without finalizing: se
 
 After leaving pairing, a server silently discards pairing messages still in flight from the client - messages sent before the client observed the leave `server/activate`. A client that has aborted an attempt likewise silently discards pairing messages received before the next `server/activate`.
 
-A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window). A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
+A server MAY send such a cancelling `server/activate` at any point during a pairing attempt. On receipt the client abandons the attempt, discarding all pairing state, and proceeds under the declared activities; an abandoned attempt does not count against a [pairing window](#pairing-window), and counts as a [failed attempt](#failed-attempts) only when the code was already being emitted. A server cancelling on operator action SHOULD first send [`pair/abort`](#client--server-pairabort) with reason `user_cancelled`, so the client can surface why the attempt ended. Servers SHOULD apply their own timeout while waiting for the attempt's first pairing message - [`client/pair-init`](#client--server-clientpair-init) or, in the Pairing PSK Flow, [`client/pair-finalize`](#client--server-clientpair-finalize) - cancelling as above on expiry.
 
 ### Unpaired Access
 
@@ -895,7 +895,9 @@ A failed key confirmation results in [`pair/abort`](#client--server-pairabort) w
 
 #### Failed attempts
 
-How a client limits failed attempts is implementation-defined, and clients SHOULD match or exceed the recommended limit below, whether by holding attempts until a manufacturer-defined operator action, as for a [pairing window](#pairing-window), or by a cooldown. An attempt counts as failed once the client has emitted the code and the attempt ends without a successful verification of `server_kc`; a successful verification resets the count. Recommended limit: after 5 consecutive failed attempts, a cooldown of 1 minute before the next attempt, doubling with each further failure, capped at 15 minutes. Where such an action is available, the client MAY additionally hold attempts from the tenth consecutive failure until it occurs. A limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending).
+An attempt counts as failed once the client has started emitting the code and the attempt ends without a successful verification of `server_kc`. After 20 consecutive failed attempts the client MUST hold attempts back until a deliberate, manufacturer-defined operator action, such as a gesture as for a [pairing window](#pairing-window), an action in the manufacturer's own app, or a power cycle. The count is not partitioned by `server_id` or source address and resets on a successful verification or on that action. A client MAY hold attempts back earlier, by a cooldown or by an operator action, including from the first attempt.
+
+The limit is not an error state - the method stays offered - and while it holds an attempt back the client sends [`client/pair-pending`](#client--server-clientpair-pending), with `retry_after_ms` for a cooldown and optionally the operator action named in `message`.
 
 ### Static Pairing Code Flow
 
@@ -1044,11 +1046,11 @@ The pairing messages below are listed in the order they appear in the Dynamic Pa
 
 #### Client → Server: `client/pair-pending`
 
-Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or its [attempt limit](#failed-attempts) has not admitted it yet. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)), which SHOULD outlast `retry_after_ms`.
+Reports that the client is holding back the selected attempt: no [pairing window](#pairing-window) is open, or its [attempt limit](#failed-attempts) has not admitted it yet. Sent immediately on receiving such a pairing [`server/activate`](#server--client-serveractivate); [`client/pair-init`](#client--server-clientpair-init) follows once the client is ready. Does not start the [attempt](#entering-and-leaving-pairing) or its timeout. The server SHOULD surface the pending state to the operator and apply its own timeout (see [Entering and leaving pairing](#entering-and-leaving-pairing)); when `retry_after_ms` is present it SHOULD either outlast it or cancel the attempt and show the operator when to retry.
 
 - `pairing_index`: integer - see [Pairing index](#messages)
 - `retry_after_ms?`: integer - the client will be ready in this many milliseconds without operator action; absent when an operator action is needed
-- `message?`: string - a short plain-text sentence for the operator, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device and MUST NOT interpret markup or links in it
+- `message?`: string - a short plain-text sentence for the operator, at most 200 characters, such as what to do to proceed, preferably in one of the server's [`languages`](#server--client-serverhello). It comes from an unauthenticated peer: the server shows it as text attributed to the device, truncates it to that length, and MUST NOT interpret markup or links in it
 
 #### Client → Server: `client/pair-init`
 
