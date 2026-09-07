@@ -482,7 +482,7 @@ Players that can output audio should have the role `player`.
 
 **Note:** Each role version may have its own support object (e.g., `player@v1_support`, `player@v2_support`). Application-specific roles or role versions follow the same pattern (e.g., `_myapp_display@v1_support`, `player@_experimental_support`).
 
-A server MUST NOT activate a role version that was listed in `supported_roles` without its support object.
+If a role version requires a support object, the server MUST NOT activate that version when the object is missing from `client/hello`.
 
 ### Server → Client: `server/activate`
 
