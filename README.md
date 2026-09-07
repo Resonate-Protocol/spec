@@ -1200,9 +1200,9 @@ Request the player to perform an action, e.g., change volume or mute state.
 
 - `player`: object
   - `command`: 'volume' | 'mute' | 'set_output_delay' - must be listed in `supported_commands` from [`client/state`](#client--server-clientstate-player-object); unlisted commands are ignored by the client
-  - `volume?`: integer - volume range 0-100, only set if `command` is `volume`
-  - `mute?`: boolean - true to mute, false to unmute, only set if `command` is `mute`
-  - `output_delay_ms?`: integer - delay in milliseconds (0-5000), only set if `command` is `set_output_delay`
+  - `volume?`: integer - volume range 0-100, required if `command` is `volume`, absent otherwise
+  - `mute?`: boolean - true to mute, false to unmute, required if `command` is `mute`, absent otherwise
+  - `output_delay_ms?`: integer - delay in milliseconds (0-5000), required if `command` is `set_output_delay`, absent otherwise
 
 The server MUST NOT send a player command to a client before that client has sent its initial [`client/state`](#client--server-clientstate).
 
