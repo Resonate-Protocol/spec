@@ -1655,7 +1655,7 @@ The `visualizer` object in [`stream/start`](#server--client-streamstart) has thi
 - `visualizer`: object
   - `types`: string[] - visualization data types the server will stream. MUST be a subset of the types the client requested in its current [`client/state`](#client--server-clientstate-visualizer-object)
   - `rate_max`: integer - periodic frames per second the server will emit. MUST NOT exceed the client's requested `rate_max`
-  - `tracks_downbeats`: boolean - only if `types` includes 'beat'. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
+  - `tracks_downbeats?`: boolean - required if `types` includes 'beat', absent otherwise. True if the server's beat tracker also identifies bar starts (downbeats). When false, the downbeat flag on `beat` messages is always 0
   - `spectrum?`: object - spectrum configuration, only if `types` includes 'spectrum'. MUST match the client's current requested configuration
     - `n_disp_bins`: integer - number of display bins
     - `scale`: 'mel' | 'log' | 'lin' - mapping from FFT frequencies to display bins
