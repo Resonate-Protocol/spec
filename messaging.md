@@ -90,13 +90,13 @@ The concatenated `data` from all fragments yields the original message's payload
 
 **Constraints:**
 
-- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other frame in that direction, whether fragmented or not.
+- Only one fragmented message may be in flight at a time per direction. A sender must finish a fragmented message with a last fragment before sending any other data frame in that direction, whether fragmented or not.
 - Senders should not fragment messages that fit in a single non-fragmented frame.
 - A sender MUST NOT use `1` as `orig_type`.
 
 **Receiver behavior:** maintain a single reassembly buffer along with the in-flight `orig_type`. On a first fragment, read `orig_type` from byte 2 and start a new buffer with the rest of the frame; on any other fragment, append the frame's data to the buffer. When bit 0 is set, dispatch the buffer as a single message of type `orig_type` and clear it.
 
-**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
+**Malformed sequences** are protocol errors; the receiver MUST close the connection. They are: a first fragment received while a fragmented message is in flight, a non-first fragment received with none in flight, a non-fragment data frame received while a fragmented message is in flight, a nonzero reserved flag bit, and an `orig_type` of `1`.
 
 ## Clock Synchronization
 
