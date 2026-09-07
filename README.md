@@ -1010,7 +1010,7 @@ A condition during pairing that no conformant peer produces - a malformed or mis
 
 A client MUST NOT list both `static_pairing_code` and `dynamic_pairing_code` (see [Methods](#methods)). A server that nevertheless receives both MUST disregard the `static_pairing_code` descriptor and proceed as if only `dynamic_pairing_code` were advertised, so a non-conformant advertisement degrades to the safer method rather than to undefined behavior.
 
-- `pairing_psk?`: object
+- `pairing_psk`: object
   - `locations?`: ('device' | 'leaflet' | 'operator')[]
 - `static_pairing_code?`: object
   - `locations?`: ('device' | 'leaflet' | 'operator')[]
