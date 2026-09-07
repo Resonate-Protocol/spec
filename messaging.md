@@ -172,7 +172,7 @@ First message sent by the server after the Noise handshake completes. Sent as an
 
 Sent by the client once it has received [`server/hello`](#server--client-serverhello). Sent as an encrypted message (binary frame, message type `0`). Contains information about the client's capabilities and roles.
 
-Players that can output audio should have the role `player`.
+Clients that can output audio should have the role `player`.
 
 - `name`: string - friendly name of the client
 - `device_info?`: object - optional information about the device
