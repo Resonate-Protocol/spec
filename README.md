@@ -940,14 +940,14 @@ sequenceDiagram
 
 #### Pairing Window
 
-The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits up to **5** attempts, all on the connection that carries its first, and closes on a completed pairing, its fifth failed attempt (the client's verification of `server_kc` fails), drop of that connection, operator cancellation, or window-lifetime expiry. An attempt that ends any other way - timed out or cancelled - only ends that attempt; the window stays open for another.
+The Static Pairing Code Flow gates every attempt on a **pairing window**: a state in which the client has decided to accept pairing attempts. The window admits attempts only on the connection that carries its first, and closes on a completed pairing, its fifth failed attempt (the client's verification of `server_kc` fails), drop of that connection, operator cancellation, or window-lifetime expiry. An attempt that ends any other way - timed out or cancelled - does not itself close the window.
 
 An attempt is **gesture-gated** - the client withholds [`client/pair-init`](#client--server-clientpair-init) until a window is open - for every `static_pairing_code` attempt.
 
 Pairing Window mechanics:
 
 - **Opening the window.** An operator gesture on the client - a physical button press, a reset-pinhole press, a button combo, a specific power-cycle pattern, a shake or motion gesture, or any equivalent implementation-defined action. Gestures SHOULD be deliberate and hard to induce remotely.
-- **Window lifetime.** From window opening, paused while an attempt is in progress. Recommended 5 minutes. On expiry, the window closes silently.
+- **Window lifetime.** From window opening, without pausing during attempts. Recommended 5 minutes. On expiry, the window closes silently. An attempt already in progress runs to its own end, but starting another requires a new pairing window.
 - **Signal to the server.** The client sends [`client/pair-init`](#client--server-clientpair-init) once the window is open and the [`server/activate`](#server--client-serveractivate) has arrived; while a gesture is awaited it signals [`client/pair-pending`](#client--server-clientpair-pending), optionally naming the gesture in `message`. The server must not send [`server/pair-auth`](#server--client-serverpair-auth) until it has received `client/pair-init`.
 
 ### Pairing Code Presentation
