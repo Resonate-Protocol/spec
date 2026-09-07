@@ -1280,7 +1280,7 @@ Each client is responsible for maintaining its own synchronization with the serv
 
 ### Suggested correction strategy
 
-This is one valid correction strategy for clients with the `player` role: discrete sample deletion and insertion. It is an example, not a requirement. New implementers can use it as a starting point, especially where CPU or memory is limited: it needs no interpolation and leaves the audio bit-exact except at the moments it corrects.
+This is one valid correction strategy for clients with the `player` role: discrete sample deletion and insertion. It is an example, not a requirement, and is intended for sample rates of 44.1 kHz and above. New implementers can use it as a starting point, especially where CPU or memory is limited: it needs no interpolation and leaves the audio bit-exact except at the moments it corrects.
 
 Other strategies are allowed and encouraged as long as they meet the rules in this section. For example, asynchronous sample-rate conversion (ASRC) continuously resamples the stream to track the clock, trading CPU/DSP load for lower steady-state distortion than discrete frame drops.
 
