@@ -666,7 +666,7 @@ Sending `stream/end` in these cases is explicitly prohibited because it signals 
 
 State update of the group this client is part of.
 
-Every message MUST carry the full group state.
+Every message MUST carry all fields listed below.
 
 - `playback_state`: 'playing' | 'stopped' - playback state of the group
 - `group_id`: string - group identifier
