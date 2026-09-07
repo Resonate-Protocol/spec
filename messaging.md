@@ -394,7 +394,7 @@ Sent by a paired server to drop its own pairing record from the client. Valid at
 Client behavior:
 
 - Remove the matched pairing record, send [`client/goodbye`](#client--server-clientgoodbye) reason `'unpaired'`, and close the connection.
-- If the session is [unpaired](README.md#definitions), there is no record to remove, so ignore the message and continue unchanged.
+- If the session is [unpaired](README.md#definitions), ignore the message and continue unchanged.
 
 ### Client → Server: `client/goodbye`
 
