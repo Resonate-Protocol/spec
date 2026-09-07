@@ -101,7 +101,7 @@ sequenceDiagram
   - **Visualizer** - visualizes music. Has preferred format for audio features
   - **Color** - receives colors derived from the current audio
 - **Group** - a group of clients. Each client belongs to exactly one group, and every group has at least one client. Every group has a unique identifier. Each group has the following states: list of member clients, volume, mute, and playback state
-- **Stream** - client-specific details on how the server is formatting and sending binary data. Each role's stream is managed separately. Each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
+- **Stream** - client-specific details on how binary data is formatted and sent in either direction. Each role's stream is managed separately. For server-to-client streams, each client receives its own independently encoded stream based on its capabilities and preferences. For players, the server sends audio chunks as far ahead as the client's buffer capacity allows. For artwork clients, the server sends album artwork and other visual images through the stream
 - **CSPRNG** - a cryptographically secure pseudorandom number generator seeded with sufficient entropy ([RFC 4086](https://www.rfc-editor.org/rfc/rfc4086)); a hardware RNG qualifies
 - **Identity** - a Curve25519 keypair used to identify a client or server in the [Noise](#encryption) handshake. The base64url-encoded public key (43 characters, no padding) serves as the `client_id` or `server_id`. Persistent across reboots. The private key MUST be drawn from a CSPRNG.
 - **long-term PSK** - a 32-byte pre-shared symmetric secret established during [pairing](#pairing) and mixed into the [Noise](#encryption) handshake state for every subsequent connection. MUST be drawn from a CSPRNG.
@@ -304,7 +304,7 @@ WebSocket control frames (Ping, Pong, Close; RFC 6455) are not Sendspin messages
 
 **Note:** In field definitions, `?` indicates an optional field (e.g., `field?`: type means the field may be omitted).
 
-All messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
+All JSON messages have a `type` field identifying the message and a `payload` object containing message-specific data. The payload structure varies by message type and is detailed in each message section below.
 
 **Message type prefixes.** The prefix before the `/` in a message `type` identifies a group of messages. `client/` and `server/` name the sender. `stream/` groups the messages that control a binary channel from the server to the client, and `client-stream/` those that control a binary channel from the client to the server; the two kinds of channel are independent and have separate lifetimes. `group/`, `pair/`, and `noise/` name a subject. Only `client/`, `server/`, and `client-stream/` imply a direction; for every other prefix each message's definition gives it.
 
