@@ -385,7 +385,7 @@ The concatenated `data` from all fragments yields the original message's payload
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate offset from the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
@@ -525,13 +525,13 @@ When a `server/activate` removes a role from `active_roles`, the server MUST fir
 ### Client → Server: `client/time`
 
 Sends current internal clock timestamp (in microseconds) to the server.
-Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
+Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information for the [time filter](#clock-synchronization).
 
 - `client_transmitted`: integer - client's internal clock timestamp in microseconds
 
 ### Server → Client: `server/time`
 
-Response to the [`client/time`](#client--server-clienttime) message with timestamps to establish clock offsets.
+Response to the [`client/time`](#client--server-clienttime) message with timestamps for the [time filter](#clock-synchronization).
 
 For synchronization, all timing is relative to the server's monotonic clock. These timestamps have microsecond precision and are not necessarily based on epoch time.
 
@@ -1188,7 +1188,7 @@ State updates must be sent whenever any state changes, including when the volume
 
 **Timing parameters:** Clients may update `required_lead_time_ms` and `min_buffer_ms` at any time (e.g., after empirically measuring lead time post-warmup, or when network conditions change). A [`stream/clear`](#server--client-streamclear) (seek or track jump) restarts on an already-running pipeline, so it often needs less warmup than a [`stream/start`](#server--client-streamstart) that begins a new stream. A client MAY lower its reported `required_lead_time_ms` while a stream is running and raise it again before the next one begins. Servers must factor in updated values for subsequent playback timing. Clients should debounce updates locally, reporting changes only after a shift in conditions appears sustained, not on transient fluctuations.
 
-**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the time filter's server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
+**Measuring timing parameters:** A player derives `min_buffer_ms` from the distribution of arrival delay across audio chunks. Every chunk carries [`send_ahead`](#server--client-audio-chunks-binary); a chunk's delay is `arrival - compute_client_time(timestamp - send_ahead)`, where `arrival` is the player's local receive time (see [Transmit timestamps](#transmit-timestamps)) and `compute_client_time` is the [time filter](#clock-synchronization)'s server-to-local mapping. Players SHOULD size `min_buffer_ms` from the upper tail of the distribution, measured over a window long enough to include intermittent interference, and SHOULD discard samples taken before the time filter has converged. `required_lead_time_ms` is not derivable from this distribution alone: it is measured from a start trigger, and the chunks following a [`stream/start`](#server--client-streamstart) that begins buffering from empty arrive under burst conditions that do not represent steady-state delay.
 
 **Format preference:** When `format` changes while a `player` stream is active, the server re-derives the stream format and sends a [`stream/start`](#server--client-streamstart) if it changed; with no active stream, the preference applies to the next stream the server starts (see [`stream/start`](#server--client-streamstart)). Clients can use this to adapt to changing network conditions or CPU constraints. The server maintains separate encoding for each client, allowing heterogeneous device capabilities within the same group.
 
@@ -1232,7 +1232,7 @@ Binary messages SHOULD be rejected if there is no active stream or the client is
 - Bytes 9-12: send_ahead (big-endian uint32) - microseconds from the server's transmission of this message to `timestamp`
 - Rest of bytes: encoded audio frame
 
-The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization, subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
+The timestamp indicates when the first audio sample in this chunk should be output. Clients must translate this server timestamp to their local clock using the [time filter](#clock-synchronization), subtracting their [`output_delay_ms`](#client--server-clientstate-player-object) from the timestamp. Clients should compensate for any known processing delays (e.g., DAC latency, audio buffer delays) by accounting for these delays when submitting audio to the hardware.
 
 `send_ahead` reports the lead the server had in hand when it sent the chunk: its transmit time is `timestamp - send_ahead` in the server's clock, taken as described in [Transmit timestamps](#transmit-timestamps). The field saturates rather than wrapping: a server MUST send `0` when it transmits at or after `timestamp`, and `4294967295` when the true lead exceeds what the field can represent (about 71 minutes). Both saturation values report that no lead was measured, not a lead of that length, so a player MUST NOT use a chunk carrying either as a delay sample.
 
@@ -1286,7 +1286,7 @@ Other strategies are allowed and encouraged as long as they meet the rules in th
 
 #### Sample deletion and insertion
 
-The player renders decoded frames at their server timestamps translated to local time by the time-filter, and corrects accumulated drift by occasionally deleting or duplicating whole frames. At realistic clock drift these corrections are small and infrequent (a few per second) and individually inaudible. A "frame" is one sample across all channels (e.g. one stereo pair).
+The player renders decoded frames at their server timestamps translated to local time by the [time filter](#clock-synchronization), and corrects accumulated drift by occasionally deleting or duplicating whole frames. At realistic clock drift these corrections are small and infrequent (a few per second) and individually inaudible. A "frame" is one sample across all channels (e.g. one stereo pair).
 
 **Soft correction.** Per decoded chunk:
 
@@ -1397,7 +1397,7 @@ The timestamp indicates when the first audio sample in this chunk was captured (
 
 A source MUST NOT send a chunk longer than 150 ms, and SHOULD NOT send one shorter than 5 ms (the final chunk before a `client-stream/end` MAY be shorter). After a network stall, clients SHOULD drop buffered backlog beyond a small bound and resume from live capture rather than burst stale audio.
 
-Source timestamps are derived from the client's clock offset, which the time filter keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous. Servers SHOULD estimate the source's effective sample rate from the delivered sample stream and use timestamps to anchor the stream in time and to detect gaps and discontinuities, not as per-chunk cut points. Servers SHOULD absorb rate deviations by resampling, keeping the correction inaudible.
+Source timestamps are derived from the [time filter](#clock-synchronization)'s mapping, which it keeps re-estimating, so they may show discontinuities or drift (e.g., ADC clock variance). Server implementations SHOULD NOT assume perfectly continuous timestamps; the audio sample stream itself SHOULD remain continuous. Servers SHOULD estimate the source's effective sample rate from the delivered sample stream and use timestamps to anchor the stream in time and to detect gaps and discontinuities, not as per-chunk cut points. Servers SHOULD absorb rate deviations by resampling, keeping the correction inaudible.
 
 ## Controller messages
 This section describes messages specific to clients with the `controller` role, which enables the client to control the group this client is part of, and switch between groups.
@@ -1671,7 +1671,7 @@ When [`stream/clear`](#server--client-streamclear) includes the visualizer role,
 Binary messages SHOULD be rejected if there is no active stream or the client is not [`available`](#client--server-clientstate). Each visualization `type` has its own binary message type. Every message carries exactly one frame of `[timestamp:8][data]`:
 
 - Byte 0: message type (uint8, one of the types listed below)
-- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the offset computed from clock synchronization
+- Bytes 1-8: timestamp (big-endian int64) - server clock time in microseconds when this data should be displayed. Clients must translate this server timestamp to their local clock using the [time filter](#clock-synchronization)
 - Remaining bytes: data, layout per type below; all `uint16` fields are big-endian
 
 Data whose timestamp is already in the past on arrival is dropped; stale visualization frames are never rendered.

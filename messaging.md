@@ -100,7 +100,7 @@ The concatenated `data` from all fragments yields the original message's payload
 
 ## Clock Synchronization
 
-Clients send `client/time` messages to maintain an accurate offset from the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
+Clients send `client/time` messages to maintain an accurate mapping between their clock and the server's clock. Implementations MUST send these messages frequently enough to keep the filter convergent. The time-filter library's [Recommended Usage](https://github.com/Sendspin-Protocol/time-filter#recommended-usage) section describes a known-good burst-strategy baseline.
 
 Binary audio messages contain timestamps in the server's time domain indicating when the audio should be played. Clients MUST use the [time-filter](https://github.com/Sendspin-Protocol/time-filter) algorithm to translate server timestamps to their local clock for synchronized playback. The time filter is a two-dimensional Kalman filter that tracks both clock offset and drift. See the [time-filter](https://github.com/Sendspin-Protocol/time-filter) repository for a C++ reference implementation and [aiosendspin](https://github.com/Sendspin-Protocol/aiosendspin/blob/main/aiosendspin/client/time_sync.py) for a Python implementation.
 
@@ -240,13 +240,13 @@ When a `server/activate` removes a role from `active_roles`, the server MUST fir
 ### Client → Server: `client/time`
 
 Sends current internal clock timestamp (in microseconds) to the server.
-Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information to establish clock offsets.
+Once received, the server responds with a [`server/time`](#server--client-servertime) message containing timing information for the [time filter](#clock-synchronization).
 
 - `client_transmitted`: integer - client's internal clock timestamp in microseconds
 
 ### Server → Client: `server/time`
 
-Response to the [`client/time`](#client--server-clienttime) message with timestamps to establish clock offsets.
+Response to the [`client/time`](#client--server-clienttime) message with timestamps for the [time filter](#clock-synchronization).
 
 For synchronization, all timing is relative to the server's monotonic clock. These timestamps have microsecond precision and are not necessarily based on epoch time.
 
