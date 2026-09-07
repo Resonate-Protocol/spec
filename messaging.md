@@ -409,7 +409,7 @@ Upon receiving this message, the server should initiate the disconnect.
   - `user_request` - user explicitly requested to disconnect from this server. Server should not auto-reconnect
   - `unauthorized` - the server declared an activity set or `active_roles` the client is not authorized for (see [`server/activate`](#server--client-serveractivate)). Server should not auto-reconnect with the same activity set
   - `pairing_required` - the client refused, or no longer admits, an [unpaired access](pairing.md#unpaired-access) connection because it does not have unpaired access enabled. Server should not auto-reconnect without pairing first
-  - `concurrent_attempt` - the client refused the connection because a higher-or-equal-priority connection is already active (e.g., one with `'playback'` in its activity set, or a pairing handshake when the incoming connection is also pairing). Server may retry later
+  - `concurrent_attempt` - the client refused the connection under the [multiple-server admission rules](connection.md#multiple-servers-server-initiated). Server may retry later
   - `unpaired` - the client has processed [`server/unpair`](#server--client-serverunpair) from this server. Server should not auto-reconnect
 
 **Note:** On a client-initiated connection the server cannot reconnect; the reconnect guidance then applies to the client re-establishing the connection.
