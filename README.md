@@ -175,9 +175,9 @@ When a new server connects, the client lets the handshake complete before applyi
 
 - A [pairing attempt](#entering-and-leaving-pairing) is not displaced by an incoming `'playback'` or `'pairing'` connection.
 - When both the current holder and the incoming connection have empty `activities`, the incoming is admitted only if its `server_id` matches the last-playback server (and the existing one's does not); otherwise the existing is kept.
-- A client MAY admit an incoming `'pairing'` connection alongside the admitted `'playback'` connection, holding both. A client that does not rejects the incoming.
+- A client MAY admit one incoming `'pairing'` connection alongside the admitted `'playback'` connection, holding both. A client that does not rejects the incoming. While both are held, further incoming connections are arbitrated against the `'playback'` holder. When a later `server/activate` drops `'pairing'` from that connection's `activities`, the client arbitrates it against the `'playback'` holder as if it were incoming.
 
-Subsequent `server/activate` updates do not trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
+Subsequent `server/activate` updates do not otherwise trigger arbitration, even when a connection escalates its activities. A provisional connection that has not sent `server/activate` within 30 seconds is dropped. Clients MAY cap how many provisional connections they hold at once, rejecting further incoming connections as if they were lower priority.
 
 A displaced connection receives [`client/goodbye`](#client--server-clientgoodbye) reason `'another_server'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` if it is a pairing handshake). A rejected incoming receives [`client/goodbye`](#client--server-clientgoodbye) reason `'concurrent_attempt'` (or [`pair/abort`](#client--server-pairabort) reason `concurrent_attempt` for pairings). The client then closes the connection.
 
@@ -1106,7 +1106,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
-  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client does not admit a pairing connection alongside its current admitted connection (see [Multiple servers](#multiple-servers-server-initiated))
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
