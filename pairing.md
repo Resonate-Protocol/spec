@@ -398,7 +398,7 @@ Aborts a pairing attempt, started or not. With reason `concurrent_attempt` the s
 
 - `reason`: string - one of:
   - `attempt_timeout` (client) - the pairing attempt did not complete within the [attempt timeout](#entering-and-leaving-pairing)
-  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client
+  - `concurrent_attempt` (client) - another pairing attempt is already in progress with this client, or the client does not admit a pairing connection alongside its current admitted connection (see [Multiple servers](connection.md#multiple-servers-server-initiated))
   - `method_not_supported` (client) - the server's activity set and `pairing.method` are not a permitted combination for the matched PSK, or `pairing.method` names a method the client does not currently offer, or `pairing.format` names an emission format the client does not currently offer
   - `pairing_code_mismatch` (client or server) - PAKE key-confirmation failed
   - `user_cancelled` (client or server) - operator aborted the pairing through a local UI
