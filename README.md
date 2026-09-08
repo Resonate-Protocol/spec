@@ -1620,6 +1620,8 @@ This section describes messages specific to clients with the `visualizer` role, 
 
 Each visualizer binary message carries exactly one frame. The server emits messages in non-decreasing timestamp order so clients can process them in arrival order. Types the server cannot stream for the current source are silently omitted from the set echoed in [`stream/start`](#server--client-streamstart-visualizer-object). `beat` and `peak` are event-driven and not throttled by `rate_max`; all other types are periodic.
 
+Timestamps may decrease only after [`stream/clear`](#server--client-streamclear-visualizer) or when starting a new stream. Updating an existing stream with `stream/start` does not allow timestamps to decrease.
+
 **`beat` vs `peak`:** `beat` is a musical pulse derived from tempo/beat tracking, landing on the rhythmic grid with downbeats marking bar starts. Accurate beat detection often relies on offline analysis (e.g. neural beat trackers); servers without such analysis omit the type. `peak` is an energy onset detected live from the audio stream and fires on any transient (drum hits, cymbal crashes, attacks), independent of the rhythmic grid. A `beat` and a `peak` can fire on the same hit, or a `peak` can fire mid-bar with no `beat`.
 
 ### Client → Server: `client/hello` visualizer@v1 support object
