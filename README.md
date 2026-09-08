@@ -1528,7 +1528,7 @@ else:
     current_track_progress_ms = max(calculated_progress, 0)
 ```
 
-`current_time` and `metadata.timestamp` must share a clock domain. `metadata.timestamp` is in the server domain, so convert it to local time via the [time filter](#clock-synchronization) before subtracting the local `current_time` (converting `current_time` the other way is equivalent).
+Obtain `current_time` in server-clock microseconds by inverting the [time filter](#clock-synchronization)'s server-to-local mapping.
 
 ## Artwork messages
 This section describes messages specific to clients with the `artwork` role, which handle display of artwork images. Artwork clients receive images in their preferred format and resolution.
