@@ -1249,7 +1249,7 @@ This section defines rules that require all implementations to provide a good ex
 
 ### Sync Accuracy
 
-Sync accuracy is measured at the audio output, against what the time-filter predicts the local time should be (not against the true server clock). Use of the [time-filter](#clock-synchronization) is required to meet these minimum standards. The error is the absolute difference between when a sample actually plays in the client's local clock and the local time the time-filter predicts for that sample's server timestamp.
+Sync accuracy is measured at the audio output, against what the time-filter predicts the local time should be (not against the true server clock). Use of the [time-filter](#clock-synchronization) is required to meet these minimum standards. The error is the absolute difference between when a sample actually plays in the client's local clock and the local time the time-filter predicts for that sample's server timestamp, minus the configured [`output_delay_ms`](#client--server-clientstate-player-object).
 
 Each client is responsible for maintaining its own synchronization with the server's timestamps.
 
