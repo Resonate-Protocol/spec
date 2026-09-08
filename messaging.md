@@ -316,7 +316,7 @@ Client sends commands to the server. Contains command objects based on the clien
 
 Leaves the client's current group. No payload fields.
 
-A client sends this when it no longer wants to take part in its group's playback, for example while performing an [interruptible non-Sendspin activity](#interruptible-activity-client-stays-available). `available` is unchanged.
+A client sends this when it no longer wants to take part in its group's playback, for example while performing an [interruptible non-Sendspin activity](#interruptible-activity-client-stays-available).
 
 The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](roles/controller/v1.md#switch-command-cycle).
 
