@@ -568,7 +568,7 @@ A client's output can be taken over by a non-Sendspin activity (playing other me
 
 If the external activity can be interrupted by Sendspin playback at any time, the client SHOULD remain `available: true` so the server can take it over.
 
-To stop rendering its group's audio while performing non-Sendspin activity, a client MAY leave its current group by sending a `client/state` with `available: false` immediately followed by a `client/state` with `available: true` (the server behavior below then moves it to a solo group and does not rejoin it). This is only needed while the group's `playback_state` is `'playing'`.
+To stop taking part in its group's playback while performing non-Sendspin activity, a client MAY leave its current group with [`client/leave`](#client--server-clientleave). This is only needed while the group's `playback_state` is `'playing'`: a client in a stopped group keeps its grouping by staying, and later playback may still take it over.
 
 #### Non-interruptible activity (client becomes unavailable)
 
@@ -597,6 +597,14 @@ Client sends commands to the server. Contains command objects based on the clien
 - `controller?`: object - only if client has `controller` role ([see controller command object details](#client--server-clientcommand-controller-object))
 
 [Application-specific roles](#application-specific-roles) may also include objects in this message (keys starting with `_`).
+
+### Client → Server: `client/leave`
+
+Leaves the client's current group. No payload fields.
+
+A client sends this when it no longer wants to take part in its group's playback, for example while performing an [interruptible non-Sendspin activity](#interruptible-activity-client-stays-available).
+
+The server handles it as [when the client becomes unavailable](#server-behavior-when-a-client-becomes-unavailable-available-false): the client ends up in a solo group with playback stopped, and rejoins only via an explicit [`switch`](#switch-command-cycle).
 
 ### Server → Client: `server/state`
 
@@ -1460,7 +1468,7 @@ This ensures that when setting group volume to 100%, all players will reach 100%
 
 #### Switch command cycle
 
-**Previous group priority:** If the client is still in the solo group from becoming unavailable (`available: false`), the `switch` command prioritizes rejoining the previous group.
+**Previous group priority:** If the client is still in the solo group it was moved to on becoming unavailable (`available: false`) or on sending [`client/leave`](#client--server-clientleave), the `switch` command prioritizes rejoining the previous group.
 
 For clients **with** the `player` role, the cycle includes:
 1. Multi-client groups that are currently playing
