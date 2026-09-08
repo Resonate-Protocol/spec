@@ -1633,9 +1633,9 @@ Timestamps may decrease only after [`stream/clear`](#server--client-streamclear-
 The `visualizer@v1_support` object in [`client/hello`](#client--server-clienthello) has this structure:
 
 - `visualizer@v1_support`: object
-  - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting each reassembled message's type byte, timestamp, and data, excluding transport overhead and decoded storage
+  - `buffer_capacity`: integer - max total size in bytes of buffered visualizer binary messages, counting only each reassembled message's type byte, timestamp, and data
 
-The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count, but updating its configuration with `stream/start` does not.
+The server MUST NOT send a message if its size plus the total size of previously sent visualizer messages with future timestamps on the server's clock would exceed `buffer_capacity`. Sending a visualizer `stream/clear` or `stream/end` resets this count.
 
 The requested data types, frame-rate cap, and spectrum configuration are dynamic and reported in the [`client/state`](#client--server-clientstate-visualizer-object) visualizer object.
 
