@@ -612,6 +612,8 @@ Server sends state updates to the client. Contains role-specific state objects.
 
 Every message MUST carry the full state of each role object it includes. Omitting a role object leaves that role's state unchanged and any pending scheduled update in place. For the `metadata` and `color` objects, a future `timestamp` defers when the state takes effect (see scheduled updates for [`metadata`](#scheduled-metadata-updates) and [`color`](#scheduled-color-updates)).
 
+After a `server/activate` adds or re-adds a role that defines a `server/state` object, the server MUST promptly send a `server/state` containing that role's current state, or `null` if there is no state to provide.
+
 The first `server/state` sent for a role on a connection, and the first after that role is re-added to `active_roles`, MUST carry a past or present `timestamp` if the role object has one, so the client is brought up to date before any scheduled update follows.
 
 A role object set to `null` clears all of that role's state, taking effect immediately and discarding any pending scheduled update.
